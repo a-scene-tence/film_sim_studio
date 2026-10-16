@@ -1,0 +1,360 @@
+// 섹션 15.1 — 섹션 6 셰이더의 픽셀 단위 단계를 float64 로 똑같이 구현한 CPU 참조.
+// S0, S4~S10, S13 그레인, S14 디더, gamutMap(16회, 1e-5). GPU↔CPU 프로브와 단위 테스트가 쓴다.
+import {
+  linToOklab, oklabToLin, shaperEnc, smoothstep as sstep, srgbDec, srgbEnc, tone, toneInv, wrap180,
+} from "../color/fse/engine.mjs";
+import { encodeLutInput } from "../color/fse/lut-domain.mjs";
+import { tetraSample } from "../color/fse/tetra.mjs";
+import * as T from "../color/source/transfer.mjs";
+import { sampleCurve } from "./curve";
+import { apply3, type Mat3 } from "./wb";
+
+export type Vec3 = [number, number, number];
+const DEG = Math.PI / 180;
+const LUMA: Vec3 = [0.2126, 0.7152, 0.0722];
+const sq = (x: number) => x * x;
+const dot = (a: ArrayLike<number>, b: ArrayLike<number>) => a[0]! * b[0]! + a[1]! * b[1]! + a[2]! * b[2]!;
+const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
+const map3 = (v: ArrayLike<number>, f: (x: number) => number): Vec3 => [f(v[0]!), f(v[1]!), f(v[2]!)];
+export const luma709 = (x: ArrayLike<number>) => dot(LUMA, x);
+
+// ── S0 ─────────────────────────────────────────────────────────────────────
+/** uProfile 정수 → 디코드 (fs_normalize decodeLog) */
+export function decodeLog(y: number, p: number): number {
+  switch (p) {
+    case 3: return T.slog3(y);
+    case 4: return T.slog2(y);
+    case 5: return T.flog(y);
+    case 6: return T.flog2(y);
+    case 7: return T.clog3(y);
+    case 8: return T.vlog(y);
+    case 9: return T.nlog(y);
+    case 10: return T.dlog(y);
+    case 11: return T.applelog(y);
+    case 2: return T.hlg(y);
+    default: return y;
+  }
+}
+
+export interface SourceLutRef { size: number; data: ArrayLike<number>; inVR: boolean; outVR: boolean }
+
+export interface NormalizeCtx {
+  profile: number;
+  limitedCV: boolean;
+  srcToWS: Mat3;
+  rawScale: number;
+  srcLut: SourceLutRef | null;
+  samsungFix: boolean;
+  rgc: boolean;
+  rolloff: boolean;
+  wb: Mat3;
+  expGain: number;
+}
+
+/** decodeToSrcLinear (GPU 는 Tref⁻¹ 를 4096칸 표로, CPU 참조는 48회 이분법 정확값) */
+export function decodeToSrcLinear(v: ArrayLike<number>, c: NormalizeCtx): Vec3 {
+  if (c.profile === 0) return map3(v, (x) => toneInv(Math.max(srgbDec(x), 0)));
+  if (c.profile === 1) return map3(v, (x) => toneInv(Math.pow(clamp01(x), 2.4)));
+  if (c.profile === 12) return map3(v, (x) => x * c.rawScale);
+  if (c.profile === 13) {
+    const L = c.srcLut;
+    if (!L) throw new Error("소스 LUT 가 없습니다");
+    let u = map3(v, clamp01);
+    if (L.inVR) u = map3(u, (x) => x * (876 / 1023) + 64 / 1023);
+    let o: Vec3 = tetraSample(L.data, L.size, u);
+    if (L.outVR) o = map3(o, (x) => (x * 1023 - 64) / 876);
+    return map3(o, (x) => toneInv(Math.pow(clamp01(x), 2.4)));
+  }
+  const y = c.limitedCV ? map3(v, (x) => (x * 876 + 64) / 1023) : map3(v, (x) => x);
+  return map3(y, (x) => decodeLog(x, c.profile));
+}
+
+/** 섹션 5.2 Samsung Log 피부 마젠타 보정 (OKLab ab 2×2 행렬) */
+export function samsungFix(x: ArrayLike<number>): Vec3 {
+  const [L, a, b] = linToOklab(x);
+  const C = Math.hypot(a, b);
+  const h = Math.atan2(b, a) / DEG;
+  const w = Math.exp(-0.5 * sq(wrap180(h - 50) / 16)) * sstep(0.02, 0.06, C) * (1 - sstep(0.85, 1.0, L));
+  const th = 4 * w * DEG;
+  const k = 1 - 0.04 * w;
+  const a2 = k * (Math.cos(th) * a - Math.sin(th) * b);
+  const b2 = k * (Math.sin(th) * a + Math.cos(th) * b);
+  return oklabToLin(L, a2, b2);
+}
+
+function rgcCompress(d: number, lim: number, thr: number): number {
+  if (d < thr) return d;
+  const scl = (lim - thr) / Math.pow(Math.pow((1 - thr) / (lim - thr), -1.2) - 1, 1 / 1.2);
+  const nd = (d - thr) / scl;
+  return thr + (scl * nd) / Math.pow(1 + Math.pow(nd, 1.2), 1 / 1.2);
+}
+
+/** 섹션 5.3 소프트 색역 압축 (ACES 1.3 RGC) */
+export function rgc(c: ArrayLike<number>): Vec3 {
+  const ach = Math.max(c[0]!, c[1]!, c[2]!);
+  if (ach <= 0) return [c[0]!, c[1]!, c[2]!];
+  const d = map3(c, (x) => (ach - x) / ach);
+  const cd: Vec3 = [rgcCompress(d[0], 1.147, 0.815), rgcCompress(d[1], 1.264, 0.803), rgcCompress(d[2], 1.312, 0.88)];
+  return map3(cd, (x) => ach - x * ach);
+}
+
+/** 섹션 5.4 필름 하이라이트 롤오프 */
+export function rolloff(x: ArrayLike<number>): Vec3 {
+  const Y = dot(LUMA, map3(x, (v) => Math.max(v, 0)));
+  if (Y <= 1) return [x[0]!, x[1]!, x[2]!];
+  const Yp = 1 + 1.04 * Math.tanh((Y - 1) / 1.04);
+  return map3(x, (v) => v * (Yp / Y));
+}
+
+/** fs_normalize 의 픽셀 경로(4탭 영역 표본 제외) */
+export function normalizePixel(v: ArrayLike<number>, c: NormalizeCtx): Vec3 {
+  let x = apply3(c.srcToWS, decodeToSrcLinear(v, c));
+  if (c.samsungFix) x = samsungFix(x);
+  if (c.rgc) x = rgc(x);
+  if (c.rolloff) x = rolloff(x);
+  return map3(apply3(c.wb, x), (q) => q * c.expGain);
+}
+
+// ── S2~S6 ──────────────────────────────────────────────────────────────────
+/** 섹션 5.7 디헤이즈 적용 */
+export function dehazeApply(x: ArrayLike<number>, D: number, A: ArrayLike<number>, t: number): Vec3 {
+  if (D === 0) return [x[0]!, x[1]!, x[2]!];
+  let J: Vec3;
+  if (D > 0) {
+    const k = D / 100;
+    const te = 1 + (Math.max(t, 0.1) - 1) * k;
+    J = [(x[0]! - A[0]!) / te + A[0]!, (x[1]! - A[1]!) / te + A[1]!, (x[2]! - A[2]!) / te + A[2]!];
+  } else {
+    const k = -D / 100;
+    J = [x[0]! + (A[0]! - x[0]!) * 0.4 * k, x[1]! + (A[1]! - x[1]!) * 0.4 * k, x[2]! + (A[2]! - x[2]!) * 0.4 * k];
+  }
+  return map3(J, (q) => Math.max(q, 0));
+}
+
+export interface ToneSliders { sh: number; hi: number; wh: number; bk: number; br: number; lb: number }
+
+/** 섹션 5.8 베이스 레이어 톤. ab = 가이드 필터 (mean_a, mean_b) — Bs = a·Yl + b */
+export function baseTone(x: ArrayLike<number>, ab: [number, number], s: ToneSliders): Vec3 {
+  const Y = dot(LUMA, x);
+  if (Y <= 2 ** -20) return [x[0]!, x[1]!, x[2]!];
+  const Yl = Math.log2(Y);
+  const Bs = ab[0] * Yl + ab[1];
+  const Dt = Yl - Bs;
+  const e = Bs - Math.log2(0.18);
+  const msh = Math.exp(-0.5 * sq((e + 3) / 1.5));
+  const mhi = sstep(-0.5, 2.5, e);
+  const mwh = sstep(1.5, 3.8, e);
+  const mbk = 1 - sstep(-7, -3, e);
+  const mmid = Math.exp(-0.5 * sq(e / 1.8));
+  const dB = 1.5 * s.sh * msh + 1.5 * s.hi * mhi + s.wh * mwh + s.bk * mbk + s.br * mmid + 1.2 * s.lb * (msh - mhi);
+  const Yp = Math.pow(2, Bs + dB + Dt);
+  return map3(x, (v) => v * (Yp / Y));
+}
+
+/** 섹션 5.8 대비 (uCt ∈ [−1,1]) */
+export function contrastOp(x: ArrayLike<number>, ct: number): Vec3 {
+  const Y = dot(LUMA, x);
+  if (Y <= 2 ** -20) return [x[0]!, x[1]!, x[2]!];
+  const e = Math.log2(Y) - Math.log2(0.18);
+  const Yp = 0.18 * Math.pow(2, e * (1 + 0.5 * ct));
+  return map3(x, (v) => v * (Yp / Y));
+}
+
+/** 섹션 5.9 cos⁴θ 비네팅 계수 */
+export function vignetteF(u: number, v: number, aspect: number, Vg: number): number {
+  const px = (u - 0.5) * aspect, py = v - 0.5;
+  const r = Math.hypot(px, py) / Math.hypot(aspect * 0.5, 0.5);
+  const k = Math.abs(Vg) / 100;
+  const q = 1 + (r * k) * (r * k);
+  const f = 1 / (q * q);
+  return Vg < 0 ? f : 1 / f;
+}
+
+/** 섹션 5.10 S6 음수 제거 */
+export function clipNeg(x: ArrayLike<number>): Vec3 {
+  const n = Math.min(x[0]!, x[1]!, x[2]!);
+  if (n >= 0) return [x[0]!, x[1]!, x[2]!];
+  const Y = dot(LUMA, x);
+  if (Y <= 0) return [0, 0, 0];
+  const t = Y / (Y - n);
+  return map3(x, (v) => Y + t * (v - Y));
+}
+
+// ── S7 ─────────────────────────────────────────────────────────────────────
+export type LutDomainName = "srgb-display" | "rec709-bt1886" | "fsh-v1" | "slog3-sgamut3cine";
+export type LutStageRef =
+  | { mode: 0 }
+  | { mode: 1; size: number; data: ArrayLike<number> }
+  | { mode: 2; size: number; data: ArrayLike<number>; domain: LutDomainName; inVR: boolean; outVR: boolean; domMin: Vec3; domMax: Vec3 };
+
+/** 원본 모드: srgbEnc(toneRef(x)) */
+export const originalEnc = (x: ArrayLike<number>): Vec3 => map3(x, (v) => srgbEnc(tone(v)));
+
+export function lutStage(x: ArrayLike<number>, L: LutStageRef): Vec3 {
+  if (L.mode === 0) return originalEnc(x);
+  if (L.mode === 1) return tetraSample(L.data, L.size, map3(x, shaperEnc));
+  let u: Vec3 = encodeLutInput(L.domain, x);
+  if (L.inVR) u = map3(u, (q) => q * (876 / 1023) + 64 / 1023);
+  u = [(u[0] - L.domMin[0]) / (L.domMax[0] - L.domMin[0]), (u[1] - L.domMin[1]) / (L.domMax[1] - L.domMin[1]), (u[2] - L.domMin[2]) / (L.domMax[2] - L.domMin[2])];
+  let o: Vec3 = tetraSample(L.data, L.size, u);
+  if (L.outVR) o = map3(o, (q) => (q * 1023 - 64) / 876);
+  return map3(o, clamp01);
+}
+
+// ── gamutMap (GPU 판: 16회, 1e-5) ──────────────────────────────────────────
+const inGamut = (c: Vec3) => c.every((v) => v >= -1e-5 && v <= 1 + 1e-5);
+
+export function gamutMap16(L0: number, a: number, b: number): Vec3 {
+  const L = clamp01(L0);
+  const C = Math.hypot(a, b);
+  if (C < 1e-9) return map3(oklabToLin(L, 0, 0), clamp01);
+  const da = a / C, db = b / C;
+  let lo = 0, hi = 0.5;
+  for (let i = 0; i < 16; i++) {
+    const m = 0.5 * (lo + hi);
+    if (inGamut(oklabToLin(L, da * m, db * m))) lo = m; else hi = m;
+  }
+  const t = 0.85 * lo;
+  let Co = C;
+  if (C > t) { const r = lo - t; Co = r > 1e-9 ? t + r * Math.tanh((C - t) / r) : t; }
+  return map3(oklabToLin(L, da * Co, db * Co), clamp01);
+}
+
+// ── S8~S12 ─────────────────────────────────────────────────────────────────
+const toLab = (v: ArrayLike<number>) => linToOklab(map3(v, srgbDec));
+
+/** 섹션 5.11 컬러 크롬 이펙트 / FX 블루 */
+export function cceOp(v: ArrayLike<number>, ke: number, kb: number): Vec3 {
+  const [L, a, b] = toLab(v);
+  const C = Math.hypot(a, b);
+  const h = Math.atan2(b, a) / DEG;
+  const blue = Math.exp(-0.5 * sq(wrap180(h - 264) / 28));
+  const me = sstep(0.08, 0.2, C) * (1 - blue) * sstep(0.3, 0.7, L);
+  const mb = sstep(0.05, 0.16, C) * blue * sstep(0.2, 0.6, L);
+  const L2 = Math.pow(Math.max(L, 0), 1 + ke * me + kb * mb);
+  return map3(gamutMap16(L2, a, b), srgbEnc);
+}
+
+/** 섹션 5.12 채널별 커브 */
+export const applyCurve = (v: ArrayLike<number>, T: ArrayLike<number>): Vec3 => map3(v, (x) => sampleCurve(T, x));
+
+/** fs_post 의 채도·생동감·명료도 (명료도 ab = 가이드 필터 계수, null 이면 명료도 생략) */
+export function postChroma(v: ArrayLike<number>, sat: number, vib: number, clarity: number, clarAB: [number, number] | null): Vec3 {
+  const chroma = sat !== 0 || vib !== 0;
+  const clar = clarity !== 0 && clarAB !== null;
+  if (!chroma && !clar) return [v[0]!, v[1]!, v[2]!];
+  let [L, a, b] = toLab(v);
+  if (chroma) {
+    const C = Math.hypot(a, b);
+    const h = Math.atan2(b, a) / DEG;
+    const C1 = C * (1 + sat / 100);
+    const skin = Math.exp(-0.5 * sq(wrap180(h - 55) / 20));
+    const g = vib >= 0 ? 1 + (vib / 100) * (1 - sstep(0, 0.2, C)) * (1 - 0.5 * skin) : 1 + (vib / 100) * (1 - 0.5 * sstep(0, 0.2, C));
+    const C2 = Math.max(0, C1 * g);
+    if (C > 1e-9) { a *= C2 / C; b *= C2 / C; } else { a = 0; b = 0; }
+  }
+  if (clar && clarAB) L = clarityL(L, clarAB[0] * L + clarAB[1], clarity);
+  return map3(gamutMap16(L, a, b), srgbEnc);
+}
+
+/** 섹션 5.13 L' = L + 1.2(Cl/100)(L−base)·4L(1−L) */
+export const clarityL = (L: number, base: number, Cl: number) => L + 1.2 * (Cl / 100) * (L - base) * 4 * L * (1 - L);
+
+/** 섹션 5.14 L' = L + (Sh/100)·1.2·D', D' = sign(D)·max(|D|−0.004, 0) */
+export function sharpenL(L: number, blur: number, Sh: number): number {
+  const D = L - blur;
+  const Dp = Math.sign(D) * Math.max(Math.abs(D) - 0.004, 0);
+  return L + (Sh / 100) * 1.2 * Dp;
+}
+
+// ── S13 그레인 (Ashima/Gustavson webgl-noise, MIT) ─────────────────────────
+const mod289 = (x: number) => x - Math.floor(x * (1 / 289)) * 289;
+const permute = (x: number) => mod289((x * 34 + 10) * x);
+const fract = (x: number) => x - Math.floor(x);
+
+export function snoise(vx: number, vy: number): number {
+  const C0 = 0.211324865405187, C1 = 0.366025403784439, C2 = -0.577350269189626, C3 = 0.024390243902439;
+  const s = (vx + vy) * C1;
+  let ix = Math.floor(vx + s), iy = Math.floor(vy + s);
+  const t = (ix + iy) * C0;
+  const x0x = vx - ix + t, x0y = vy - iy + t;
+  const i1x = x0x > x0y ? 1 : 0, i1y = x0x > x0y ? 0 : 1;
+  const x12 = [x0x + C0 - i1x, x0y + C0 - i1y, x0x + C2, x0y + C2] as const;
+  ix = mod289(ix); iy = mod289(iy);
+  const p0 = permute(permute(iy) + ix);
+  const p1 = permute(permute(iy + i1y) + ix + i1x);
+  const p2 = permute(permute(iy + 1) + ix + 1);
+  const m = [
+    Math.max(0.5 - (x0x * x0x + x0y * x0y), 0),
+    Math.max(0.5 - (x12[0] * x12[0] + x12[1] * x12[1]), 0),
+    Math.max(0.5 - (x12[2] * x12[2] + x12[3] * x12[3]), 0),
+  ].map((q) => q * q * q * q);
+  const xs = [p0, p1, p2].map((p) => 2 * fract(p * C3) - 1);
+  const hs = xs.map((x) => Math.abs(x) - 0.5);
+  const a0 = xs.map((x) => x - Math.floor(x + 0.5));
+  const mm = m.map((q, i) => q * (1.79284291400159 - 0.85373472095314 * (a0[i]! * a0[i]! + hs[i]! * hs[i]!)));
+  const g0 = a0[0]! * x0x + hs[0]! * x0y;
+  const g1 = a0[1]! * x12[0] + hs[1]! * x12[1];
+  const g2 = a0[2]! * x12[2] + hs[2]! * x12[3];
+  return 130 * (mm[0]! * g0 + mm[1]! * g1 + mm[2]! * g2);
+}
+
+/** 섹션 5.15 n — px = 이미지 픽셀 중심 좌표 */
+export function grainNoise(pxX: number, pxY: number, scale: number, off: [number, number]): number {
+  const qx = pxX / scale + off[0], qy = pxY / scale + off[1];
+  return (0.72 * snoise(qx, qy) + 0.28 * snoise(qx * 2.03 + 17.13, qy * 2.03 + 41.71)) * (0.65 + 0.35 * snoise(qx * 0.37 + 3.7, qy * 0.37 + 9.1));
+}
+
+export function grainApply(v: ArrayLike<number>, amount: number, n: number): Vec3 {
+  const vl = dot(LUMA, v);
+  const resp = Math.sqrt(Math.max(4 * vl * (1 - vl), 0));
+  return map3(v, (x) => clamp01(x + 0.07 * (amount / 100) * resp * n));
+}
+
+// ── S14 디더 ──────────────────────────────────────────────────────────────
+export function pcg3d(x: number, y: number, z: number): [number, number, number] {
+  let a = (Math.imul(x >>> 0, 1664525) + 1013904223) >>> 0;
+  let b = (Math.imul(y >>> 0, 1664525) + 1013904223) >>> 0;
+  let c = (Math.imul(z >>> 0, 1664525) + 1013904223) >>> 0;
+  a = (a + Math.imul(b, c)) >>> 0; b = (b + Math.imul(c, a)) >>> 0; c = (c + Math.imul(a, b)) >>> 0;
+  a = (a ^ (a >>> 16)) >>> 0; b = (b ^ (b >>> 16)) >>> 0; c = (c ^ (c >>> 16)) >>> 0;
+  a = (a + Math.imul(b, c)) >>> 0; b = (b + Math.imul(c, a)) >>> 0; c = (c + Math.imul(a, b)) >>> 0;
+  return [a, b, c];
+}
+
+/** v8 = round(clamp(v + (n1+n2−1)/255)·255) — 정수 픽셀 좌표 (x,y) */
+export function dither8(v: ArrayLike<number>, x: number, y: number): Vec3 {
+  const n1 = pcg3d(x, y, 0)[0] / 4294967296;
+  const n2 = pcg3d(x, y, 1)[0] / 4294967296;
+  return map3(v, (q) => Math.floor(clamp01(q + (n1 + n2 - 1) / 255) * 255 + 0.5));
+}
+
+// ── 공간 단계를 끈 전체 픽셀 경로 (GPU↔CPU 프로브) ─────────────────────────
+export interface PixelCtx {
+  norm: NormalizeCtx;
+  ct: number;
+  vig: number;
+  aspect: number;
+  lut: LutStageRef;
+  mono: boolean;
+  ke: number;
+  kb: number;
+  curve: ArrayLike<number> | null;
+  sat: number;
+  vib: number;
+  grain: { amount: number; scale: number; off: [number, number] } | null;
+}
+
+/** v = 소스 텍셀, (u, vv) = 전역 uv, (pxX, pxY) = 이미지 픽셀 중심 좌표 */
+export function pixelPipeline(v: ArrayLike<number>, u: number, vv: number, pxX: number, pxY: number, c: PixelCtx): Vec3 {
+  let x = normalizePixel(v, c.norm);
+  if (c.ct !== 0) x = contrastOp(x, c.ct);
+  if (c.vig !== 0) { const f = vignetteF(u, vv, c.aspect, c.vig); x = map3(x, (q) => q * f); }
+  x = clipNeg(x);
+  let o = lutStage(x, c.lut);
+  if (!c.mono && (c.ke > 0 || c.kb > 0)) o = cceOp(o, c.ke, c.kb);
+  if (c.curve) o = applyCurve(o, c.curve);
+  o = postChroma(o, c.sat, c.vib, 0, null);
+  if (c.grain && c.grain.amount > 0) o = grainApply(o, c.grain.amount, grainNoise(pxX, pxY, c.grain.scale, c.grain.off));
+  return o;
+}

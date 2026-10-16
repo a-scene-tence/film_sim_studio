@@ -1,0 +1,726 @@
+// 섹션 13 렌더러 API — WebGL2 멀티패스 (사진 프록시·원본 타일, 비디오 실시간).
+import { matrixToWS } from "../color/source/primaries.mjs";
+import { getFullResolutionTile, type MediaAsset, type SourceDescriptor } from "../media-loader";
+import { displaySizeOf, orientationFromMatrix } from "../media/video-probe";
+import { bakeCurve, curveOn, CURVE_N } from "./curve";
+import { DEFAULT_ATM, type Vec3 } from "./dehaze-atm";
+import { createLut3D, createTex2D, createContext, detectCaps, halfToFloat, renderErrors, renderWarnings, setUnpackState, type RendererCaps } from "./gl";
+import { PASS_NAMES } from "./glsl";
+import { RenderGraph, type ChainParams, type LutUniforms, type NormalizeUniforms } from "./graph";
+import { DOMAIN_INDEX, listStoreLuts, loadBuiltinLut, loadManifest, loadStoreLut, storeSourceProfile, type CpuLut, type LutManifest, type ManifestSim, type StoreLut } from "./luts";
+import { DEFAULT_PARAMS, effectiveParams, scalarUniforms, toneOpsOn, type Effective, type RenderParams } from "./params";
+import { grainOffset, grainScaleFull, grainScalePreview, hdfPlan, scaledSize, tilePadding, graphSizes, type Size } from "./plan";
+import type { LutStageRef, NormalizeCtx, PixelCtx } from "./reference";
+import { toneInvTable, TONE_INV_N } from "./tone-inv-table";
+import { probeVideoOrientation, type OrientationProbeResult } from "./video-orientation-probe";
+import { VideoSource, type VideoStats } from "./video-source";
+import { colMajor, IDENTITY3, inv3, wbMatrix, type Mat3 } from "./wb";
+
+export type { RendererCaps } from "./gl";
+
+const LOST_WARNING = "GPU 컨텍스트 손실 — 복구를 기다리는 중";
+export interface RenderStats { passes: number; cpuMs: number; R: { width: number; height: number } }
+
+/** 프로브 렌더 덮어쓰기: 공간 단계(HDF, 디헤이즈, 베이스 톤, 명료도, 선명도)를 끄고 그레인 강도를 지정 */
+export interface ProbeOverride { grainAmount: number }
+
+const PROFILE_INDEX: Readonly<Record<string, number>> = {
+  "srgb-image": 0, rec709: 1, hlg: 2, slog3: 3, slog2: 4, flog: 5, flog2: 6, clog3: 7, vlog: 8, nlog: 9, dlog: 10, applelog: 11, "raw-linear": 12,
+};
+
+interface GpuLut { cpu: CpuLut; tex: WebGLTexture; flags?: { inVR: boolean; outVR: boolean; min: Vec3; max: Vec3; domain: number; name: string } }
+
+export interface RendererInfo {
+  R: Size | null;
+  A: Size | null;
+  D: Size | null;
+  profileIndex: number | null;
+  orient: number;
+  srcSize: Size | null;
+  atm: Vec3;
+  lutKey: string | null;
+  sourceLutName: string | null;
+  orientationProbe: OrientationProbeResult | null;
+  chainVersion: number;
+}
+
+export class FilmRenderer {
+  readonly caps: RendererCaps;
+  readonly warnings: string[] = [];
+  /** 렌더·상태 변화 알림 (UI 갱신용) */
+  onStatus: (() => void) | null = null;
+  onError: ((e: Error) => void) | null = null;
+
+  private gl: WebGL2RenderingContext;
+  private graph: RenderGraph;
+  private lost = false;
+  private asset: MediaAsset | null = null;
+  private srcTex: WebGLTexture | null = null;
+  private srcSize: Size | null = null;
+  private srcOrient = 1;
+  private videoSrc: VideoSource | null = null;
+  private videoFmt: { internal: number; type: number } | null = null;
+  private orientProbe: OrientationProbeResult | null = null;
+  private frameIndex = 0;
+  private params: RenderParams = DEFAULT_PARAMS;
+  private manifest: LutManifest | null = null;
+  private gpuLuts = new Map<string, GpuLut>();
+  private lutKey: string | null = null;
+  private sourceLut: GpuLut | null = null;
+  private sourceLutMissing = false;
+  private curveKey = "";
+  private curveTex: WebGLTexture | null = null;
+  private curveTable: Float32Array | null = null;
+  private toneInvTex: WebGLTexture | null = null;
+  private atm: Vec3 = DEFAULT_ATM;
+  private atmSig = "";
+  private atmPending: { buf: WebGLBuffer; sync: WebGLSync; w: number; h: number; half: boolean } | null = null;
+  private atmFrames = 0;
+  private atmVideoSig = "";
+  private lastChainSig = "";
+  private chainVersion = 0;
+  private rafPending = false;
+  private resourceSeq = 0;
+  private ready: Promise<void> = Promise.resolve();
+  private lastR: Size | null = null;
+  private disposed = false;
+
+  static create(canvas: HTMLCanvasElement): FilmRenderer {
+    return new FilmRenderer(canvas);
+  }
+
+  private constructor(private canvas: HTMLCanvasElement) {
+    this.gl = createContext(canvas);
+    this.caps = detectCaps(this.gl, this.warnings);
+    this.graph = this.buildGraph();
+    canvas.addEventListener("webglcontextlost", this.onLost);
+    canvas.addEventListener("webglcontextrestored", this.onRestored);
+    // 비디오 R 은 캔버스 CSS 크기를 따른다: 크기가 바뀌면(일시정지 중 포함) 다시 그린다
+    if (typeof ResizeObserver === "function") {
+      this.resizeObs = new ResizeObserver(() => { if (this.asset?.kind === "video") this.scheduleRender(); });
+      this.resizeObs.observe(canvas);
+    }
+  }
+
+  private resizeObs: ResizeObserver | null = null;
+
+  private buildGraph(): RenderGraph {
+    const g = new RenderGraph(this.gl, this.caps);
+    g.compileAll(PASS_NAMES);
+    const t = toneInvTable();
+    this.toneInvTex = createTex2D(this.gl, TONE_INV_N, 1, this.gl.R16F, this.gl.RED, this.gl.FLOAT, this.gl.LINEAR, t);
+    g.toneInvTex = this.toneInvTex;
+    this.curveKey = "";
+    return g;
+  }
+
+  // ── 컨텍스트 손실 ─────────────────────────────────────────────────────────
+  private onLost = (e: Event) => {
+    e.preventDefault();
+    this.lost = true;
+    this.warn(LOST_WARNING);
+  };
+
+  private onRestored = () => {
+    this.lost = false;
+    // 복구된 컨텍스트는 확장이 모두 꺼진 상태이므로 다시 켠다
+    const lostIdx = this.warnings.indexOf(LOST_WARNING);
+    if (lostIdx >= 0) this.warnings.splice(lostIdx, 1);
+    const videoHalf = this.caps.videoHalfFloatUpload;
+    Object.assign(this.caps, detectCaps(this.gl, this.warnings), { videoHalfFloatUpload: videoHalf === null ? null : videoHalf });
+    this.graph.pool.forget();
+    this.gpuLuts.clear();
+    this.sourceLut = null;
+    this.sourceLutResolved = "";
+    this.curveTex = null;
+    this.srcTex = null;
+    this.videoFmt = null;
+    this.atmPending = null;
+    this.graph = this.buildGraph();
+    this.lastChainSig = "";
+    if (this.asset?.kind !== "video" && this.asset) this.uploadPhoto(this.asset);
+    this.setParams(this.params);
+  };
+
+  private warn(w: string): void {
+    if (!this.warnings.includes(w)) this.warnings.push(w);
+    this.onStatus?.();
+  }
+
+  // ── 소스 ─────────────────────────────────────────────────────────────────
+  private releaseSource(): void {
+    this.videoSrc?.dispose();
+    this.videoSrc = null;
+    if (this.srcTex) this.gl.deleteTexture(this.srcTex);
+    this.srcTex = null;
+    this.srcSize = null;
+    this.videoFmt = null;
+    this.graph.resetTargets();
+    this.atm = DEFAULT_ATM;
+    this.atmSig = "";
+    this.atmVideoSig = "";
+    this.atmPending = null;
+    this.lastChainSig = "";
+    this.lastR = null;
+    this.sourceLutResolved = "";
+  }
+
+  private uploadPhoto(asset: MediaAsset): void {
+    const gl = this.gl;
+    const p = asset.proxy;
+    this.srcTex = createTex2D(gl, p.width, p.height, gl.RGBA16F, gl.RGBA, gl.FLOAT, gl.LINEAR, p.data);
+    this.srcSize = { width: p.width, height: p.height };
+    this.srcOrient = 1;
+  }
+
+  /** 섹션 11: proxy(Float32 RGBA, 표시 방향 적용됨)를 uSrc 로. uOrient = 1, R = 프록시 크기 */
+  setPhotoSource(asset: MediaAsset): void {
+    this.releaseSource();
+    this.asset = asset;
+    this.uploadPhoto(asset);
+    this.refreshSourceLut();
+  }
+
+  /** 섹션 10: 비디오 소스 (회전 메타 + 브라우저 업로드 방향 판별) */
+  async setVideoSource(asset: MediaAsset, file: File): Promise<void> {
+    this.releaseSource();
+    this.asset = asset;
+    const info = asset.video;
+    if (!info) throw renderErrors.noSource();
+    const rot = info.rotation;
+    const o = orientationFromMatrix(...rot.matrix);
+    if (o.unsupported) this.warn(renderWarnings.rotationUnsupported);
+    if (rot.orientation !== 1) {
+      this.orientProbe = await probeVideoOrientation(this.graph);
+      if (this.orientProbe.status === "unknown") this.warn(renderWarnings.orientationProbeUnknown);
+    }
+    const vs = new VideoSource(file, info.fps || 30, (t, idx) => this.onVideoFrame(t, idx), () => { this.lastR = null; this.onStatus?.(); });
+    this.videoSrc = vs;
+    await vs.load();
+    if (info.playback4k60 && !info.playback4k60.supported) this.warn("이 기기는 4K60 실시간 디코드를 보장하지 않습니다");
+    this.refreshSourceLut();
+    this.onVideoFrame(vs.video.currentTime, vs.frameIndexAt(vs.video.currentTime));
+  }
+
+  /** 같은 자산의 descriptor 갱신(Log 배지 전환 등). 소스 텍스처는 그대로 둔다 */
+  updateAsset(asset: MediaAsset): void {
+    if (!this.asset || this.asset.id !== asset.id) return;
+    this.asset = asset;
+    this.lastChainSig = "";
+    this.atmSig = "";
+    this.atmVideoSig = "";
+    this.refreshSourceLut();
+  }
+
+  /** 표시 크기 = 회전 메타 기준 (video.videoWidth 는 신뢰하지 않는다) */
+  private displaySize(): Size | null {
+    const a = this.asset;
+    if (!a) return null;
+    if (a.kind === "video" && a.video) return displaySizeOf(a.video.rotation);
+    return { width: a.displaySize.width, height: a.displaySize.height };
+  }
+
+  private uploadVideoFrame(): boolean {
+    const gl = this.gl;
+    const v = this.videoSrc?.video;
+    const a = this.asset;
+    if (!v || !a?.video || v.readyState < 2) return false;
+    if (!this.srcTex) this.srcTex = createTex2D(gl, 1, 1, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, gl.LINEAR, null);
+    gl.bindTexture(gl.TEXTURE_2D, this.srcTex);
+    setUnpackState(gl);
+    if (!this.videoFmt) {
+      while (gl.getError() !== gl.NO_ERROR) { /* 이전 오류 비움 */ }
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, v);
+      const ok = gl.getError() === gl.NO_ERROR;
+      this.caps.videoHalfFloatUpload = ok;
+      this.videoFmt = ok ? { internal: gl.RGBA16F, type: gl.HALF_FLOAT } : { internal: gl.RGBA8, type: gl.UNSIGNED_BYTE };
+      if (!ok) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, v);
+    } else {
+      gl.texImage2D(gl.TEXTURE_2D, 0, this.videoFmt.internal, gl.RGBA, this.videoFmt.type, v);
+    }
+    const rot = a.video.rotation;
+    const disp = displaySizeOf(rot);
+    const texRot = this.textureRotated(v, rot.orientation);
+    this.srcOrient = texRot ? 1 : rot.orientation;
+    this.srcSize = texRot ? disp : { width: rot.codedWidth, height: rot.codedHeight };
+    return true;
+  }
+
+  /**
+   * 섹션 10.2-6 textureRotated. 프로브 영상 자체를 디코드하지 못해 dimsRotated 도 없을 때(코덱 미지원 등)는
+   * 같은 크기 비교(폴백)를 실제 영상에 적용한다: videoWidth×videoHeight 가 coded 의 가로세로 교환이면 회전된 업로드.
+   */
+  private textureRotated(v: HTMLVideoElement, orientation: number): boolean {
+    const p = this.orientProbe;
+    if (orientation === 1 || !p) return false;
+    if (p.status !== "unknown" || p.dimsRotated !== null) return p.textureRotated;
+    const rot = this.asset?.video?.rotation;
+    if (!rot || orientation < 5 || rot.codedWidth === rot.codedHeight) return false;
+    return v.videoWidth === rot.codedHeight && v.videoHeight === rot.codedWidth;
+  }
+
+  private onVideoFrame(mediaTime: number, frameIndex: number): void {
+    if (this.disposed || this.lost) return;
+    this.frameIndex = frameIndex;
+    if (!this.uploadVideoFrame()) return;
+    this.pollAtm();
+    try {
+      this.renderNow();
+    } catch (e) {
+      this.onError?.(e as Error);
+    }
+    void mediaTime;
+  }
+
+  // ── 파라미터·리소스 ───────────────────────────────────────────────────────
+  setParams(p: RenderParams): void {
+    this.params = p;
+    const seq = ++this.resourceSeq;
+    this.ready = this.syncResources(seq).catch((e: unknown) => { this.onError?.(e as Error); });
+    void this.ready.then(() => { if (seq === this.resourceSeq) this.scheduleRender(); });
+  }
+
+  /** 현재 파라미터의 LUT 등 비동기 리소스가 준비될 때까지 기다린다 */
+  whenReady(): Promise<void> {
+    return this.ready;
+  }
+
+  private simMeta(): ManifestSim | null {
+    if (this.params.sim === "none") return null;
+    return this.manifest?.sims.find((s) => s.id === this.params.sim) ?? null;
+  }
+
+  private async syncResources(seq: number): Promise<void> {
+    if (!this.manifest) {
+      try { this.manifest = await loadManifest(); } catch (e) { throw renderErrors.lut(e instanceof Error ? e.message : String(e)); }
+    }
+    const p = this.params;
+    let key: string | null = null;
+    if (p.lookLutId) {
+      const l = await loadStoreLut(p.lookLutId);
+      if (!l) throw renderErrors.lut(`외부 LUT ${p.lookLutId} 없음`);
+      if (seq !== this.resourceSeq) return;
+      key = this.ensureGpuLut(l, l).cpu.key;
+    } else if (p.sim !== "none") {
+      const sim = this.manifest.sims.find((s) => s.id === p.sim);
+      if (!sim) throw renderErrors.lut(`알 수 없는 시뮬레이션 ${p.sim}`);
+      let l: CpuLut;
+      try { l = await loadBuiltinLut(sim, this.manifest.size); } catch (e) { throw renderErrors.lut(e instanceof Error ? e.message : String(e)); }
+      if (seq !== this.resourceSeq) return;
+      key = this.ensureGpuLut(l, null).cpu.key;
+      this.evictBuiltins();
+    }
+    this.lutKey = key;
+    await this.refreshSourceLutAsync();
+  }
+
+  private ensureGpuLut(l: CpuLut, store: StoreLut | null): GpuLut {
+    let g = this.gpuLuts.get(l.key);
+    if (!g) {
+      g = { cpu: l, tex: createLut3D(this.gl, l.size, l.data) };
+      if (store) {
+        const m = store.meta;
+        g.flags = { inVR: m.inVideoRange, outVR: m.outVideoRange, min: m.domainMin, max: m.domainMax, domain: DOMAIN_INDEX[m.inputDomain], name: m.name };
+      }
+      this.gpuLuts.set(l.key, g);
+    } else {
+      this.gpuLuts.delete(l.key);
+      this.gpuLuts.set(l.key, g);
+    }
+    return g;
+  }
+
+  /** 내장 LUT GPU 텍스처도 최근 4개만 유지 */
+  private evictBuiltins(): void {
+    const builtins = [...this.gpuLuts.keys()].filter((k) => k.startsWith("builtin:"));
+    while (builtins.length > 4) {
+      const k = builtins.shift()!;
+      if (k === this.lutKey) continue;
+      const g = this.gpuLuts.get(k);
+      if (g) this.gl.deleteTexture(g.tex);
+      this.gpuLuts.delete(k);
+    }
+  }
+
+  private refreshSourceLut(): void {
+    void this.refreshSourceLutAsync().then(() => this.scheduleRender());
+  }
+
+  private sourceLutResolved = "";
+
+  private async refreshSourceLutAsync(): Promise<void> {
+    const a = this.asset;
+    const want = a ? storeSourceProfile(a.descriptor.profile) : null;
+    if (!want) { this.sourceLut = null; this.sourceLutMissing = false; this.sourceLutResolved = ""; return; }
+    // 같은 (자산, 프로파일, 선택 LUT) 이면 IndexedDB 를 다시 읽지 않는다
+    const rkey = JSON.stringify([a!.id, want, this.params.sourceLutId]);
+    if (rkey === this.sourceLutResolved && (this.sourceLut || this.sourceLutMissing)) return;
+    this.sourceLutResolved = rkey;
+    let id = this.params.sourceLutId;
+    if (!id) id = (await listStoreLuts()).find((m) => m.role === "source-transform" && m.sourceProfile === want)?.id ?? null;
+    const l = id ? await loadStoreLut(id) : null;
+    if (!l || l.meta.role !== "source-transform") {
+      this.sourceLut = null;
+      this.sourceLutMissing = true;
+      this.warn(renderWarnings.sourceLutRequired);
+      return;
+    }
+    this.sourceLutMissing = false;
+    this.sourceLut = this.ensureGpuLut(l, l);
+  }
+
+  // ── 체인 파라미터 ─────────────────────────────────────────────────────────
+  private profileIndex(d: SourceDescriptor): number {
+    if (d.profile === "pq") throw renderErrors.pq();
+    if (d.profile === "samsunglog" || d.profile === "dlogm") return this.sourceLut ? 13 : 1;
+    const i = PROFILE_INDEX[d.profile];
+    if (i === undefined) throw renderErrors.noSource();
+    return i;
+  }
+
+  private normalizeUniforms(d: SourceDescriptor): { u: NormalizeUniforms; ctx: NormalizeCtx } {
+    const profile = this.profileIndex(d);
+    const srcToWS: Mat3 = profile === 13 ? IDENTITY3 : (matrixToWS(d.primaries) as Mat3);
+    const e = this.effective();
+    const wb = wbMatrix(e.adjust.temp, e.adjust.tint);
+    const sl = profile === 13 ? this.sourceLut : null;
+    const ctx: NormalizeCtx = {
+      profile,
+      limitedCV: profile >= 3 && profile <= 9 && d.range === "limited",
+      srcToWS,
+      rawScale: d.rawScale ?? 1,
+      srcLut: sl ? { size: sl.cpu.size, data: sl.cpu.data, inVR: sl.flags?.inVR ?? false, outVR: sl.flags?.outVR ?? false } : null,
+      samsungFix: d.profile === "samsunglog",
+      rgc: d.primaries !== "srgb",
+      rolloff: profile >= 2 && profile <= 11,
+      wb,
+      expGain: scalarUniforms(e).uExpGain,
+    };
+    const u: NormalizeUniforms = {
+      profile, limitedCV: ctx.limitedCV, srcToWS: colMajor(srcToWS), rawScale: ctx.rawScale,
+      srcLut: sl ? { tex: sl.tex, N: sl.cpu.size, inVR: ctx.srcLut!.inVR, outVR: ctx.srcLut!.outVR } : null,
+      samsungFix: ctx.samsungFix, rgc: ctx.rgc, rolloff: ctx.rolloff, wb: colMajor(wb),
+    };
+    return { u, ctx };
+  }
+
+  private probeOverride: ProbeOverride | null = null;
+
+  private effective(): Effective {
+    const e = effectiveParams(this.params, this.simMeta()?.mono ?? false);
+    const o = this.probeOverride;
+    if (!o) return e;
+    return {
+      ...e, hdf: false,
+      adjust: { ...e.adjust, dehaze: 0, shadows: 0, highlights: 0, whites: 0, blacks: 0, brightness: 0, lightBalance: 0, clarity: 0, sharpen: 0, grainAmount: o.grainAmount },
+    };
+  }
+
+  private curve(): { on: boolean; tex: WebGLTexture } {
+    const c = this.params.curve;
+    const key = JSON.stringify(c);
+    if (key !== this.curveKey || !this.curveTex) {
+      this.curveTable = bakeCurve(c);
+      if (this.curveTex) this.gl.deleteTexture(this.curveTex);
+      this.curveTex = createTex2D(this.gl, CURVE_N, 1, this.gl.R16F, this.gl.RED, this.gl.FLOAT, this.gl.LINEAR, this.curveTable);
+      this.curveKey = key;
+    }
+    return { on: curveOn(c), tex: this.curveTex };
+  }
+
+  private lutUniforms(): LutUniforms {
+    const g = this.lutKey ? this.gpuLuts.get(this.lutKey) : undefined;
+    if (!g) return { mode: 0, tex: null, N: 2, domain: 0, inVR: false, outVR: false, min: [0, 0, 0], max: [1, 1, 1] };
+    if (g.flags) return { mode: 2, tex: g.tex, N: g.cpu.size, domain: g.flags.domain, inVR: g.flags.inVR, outVR: g.flags.outVR, min: g.flags.min, max: g.flags.max };
+    return { mode: 1, tex: g.tex, N: g.cpu.size, domain: 0, inVR: false, outVR: false, min: [0, 0, 0], max: [1, 1, 1] };
+  }
+
+  /** 렌더 크기 R: 사진 = 프록시, 비디오 = 섹션 10.5 */
+  private renderSize(): Size {
+    const a = this.asset!;
+    if (a.kind !== "video") return { width: a.proxy.width, height: a.proxy.height };
+    const disp = this.displaySize()!;
+    const cssLong = Math.max(this.canvas.clientWidth, this.canvas.clientHeight) || Math.max(disp.width, disp.height);
+    const dpr = typeof devicePixelRatio === "number" ? devicePixelRatio : 1;
+    const tier = this.videoSrc?.tier ?? 1;
+    const rLong = Math.max(1, Math.round(Math.min(1920, cssLong * dpr) * tier));
+    return scaledSize(disp, rLong);
+  }
+
+  /** 출력 이미지 장축 (그레인 g0 기준) */
+  private outLong(): number {
+    const d = this.displaySize()!;
+    return Math.max(d.width, d.height);
+  }
+
+  private chainParams(R: Size): ChainParams {
+    const a = this.asset!;
+    const e = this.effective();
+    const s = scalarUniforms(e);
+    const seed = a.kind === "video" ? this.frameIndex : 0;
+    return {
+      mode: a.kind === "video" ? "video" : "photo",
+      R,
+      src: { tex: this.srcTex!, size: this.srcSize!, orient: this.srcOrient },
+      norm: this.normalizeUniforms(a.descriptor).u,
+      s,
+      toneOps: toneOpsOn(e),
+      hdf: e.hdf,
+      mono: e.mono,
+      curve: this.curve(),
+      lut: this.lutUniforms(),
+      wsToSG3C: colMajor(inv3(matrixToWS("s-gamut3-cine") as Mat3)),
+      grain: { scale: grainScalePreview(this.outLong(), Math.max(R.width, R.height), e.adjust.grainSize), off: grainOffset(seed) },
+      hdfPlan: hdfPlan(R),
+    };
+  }
+
+  /** 체인 서명: 미리보기 결과(tHalo, tTrans, tToneAB, tClarAB, A)가 현재 파라미터와 같은지 */
+  private chainSig(R: Size): string {
+    const a = this.asset;
+    return JSON.stringify([a?.id, a?.descriptor, R, this.params, this.lutKey, this.sourceLut?.cpu.key ?? null]);
+  }
+
+  private atmSignature(R: Size): string {
+    const a = this.asset;
+    const e = this.effective();
+    return JSON.stringify([a?.id, a?.descriptor, this.sourceLut?.cpu.key ?? null, e.adjust.temp, e.adjust.tint, e.adjust.exposure, e.hdf, R]);
+  }
+
+  private scheduleRender(): void {
+    if (this.rafPending || this.disposed) return;
+    if (this.asset?.kind === "video" && this.videoSrc && !this.videoSrc.video.paused) return; // 재생 중엔 표시 프레임이 렌더를 이끈다
+    this.rafPending = true;
+    requestAnimationFrame(() => {
+      this.rafPending = false;
+      if (!this.asset || this.lost) return;
+      try {
+        if (this.asset.kind === "video") this.uploadVideoFrame();
+        this.renderNow();
+      } catch (e) {
+        this.onError?.(e as Error);
+      }
+    });
+  }
+
+  // ── 렌더 ─────────────────────────────────────────────────────────────────
+  renderNow(): RenderStats {
+    const t0 = performance.now();
+    if (!this.asset || !this.srcTex || !this.srcSize) throw renderErrors.noSource();
+    if (this.lost) throw renderErrors.lost();
+    const R = this.renderSize();
+    if (!this.lastR || this.lastR.width !== R.width || this.lastR.height !== R.height) {
+      this.graph.resetTargets();
+      this.lastR = R;
+      this.atmSig = "";
+    }
+    if (this.canvas.width !== R.width) this.canvas.width = R.width;
+    if (this.canvas.height !== R.height) this.canvas.height = R.height;
+    const c = this.chainParams(R);
+    const atmReq = this.atmRequest(R, c.s.uDehaze);
+    const r = this.graph.renderPreview(c, { kind: "canvas" }, atmReq, (A) => { this.atm = A; });
+    this.atm = r.atm;
+    if (r.dzA) this.startAtmRead(r.dzA);
+    this.lastChainSig = this.chainSig(R);
+    this.chainVersion++;
+    const stats = { passes: r.passes, cpuMs: performance.now() - t0, R };
+    this.onStatus?.();
+    return stats;
+  }
+
+  private atmRequest(R: Size, dehaze: number): { value: Vec3; refresh: "none" | "sync" | "async" } {
+    if (dehaze === 0) return { value: this.atm, refresh: "none" };
+    const sig = this.atmSignature(R);
+    if (this.asset?.kind === "video") {
+      this.atmFrames++;
+      const need = !this.atmPending && (this.atmVideoSig !== sig || this.atmFrames >= 120);
+      if (need) { this.atmVideoSig = sig; this.atmFrames = 0; return { value: this.atm, refresh: "async" }; }
+      return { value: this.atm, refresh: "none" };
+    }
+    if (sig !== this.atmSig) { this.atmSig = sig; return { value: this.atm, refresh: "sync" }; }
+    return { value: this.atm, refresh: "none" };
+  }
+
+  /** 섹션 10.6 PIXEL_PACK_BUFFER + fenceSync 비동기 판독 */
+  private startAtmRead(t: import("./gl").Target): void {
+    const gl = this.gl;
+    const buf = gl.createBuffer();
+    if (!buf) return;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+    const half = (gl.getParameter(gl.IMPLEMENTATION_COLOR_READ_TYPE) as number) === gl.HALF_FLOAT;
+    const bytes = t.width * t.height * 4 * (half ? 2 : 4);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, buf);
+    gl.bufferData(gl.PIXEL_PACK_BUFFER, bytes, gl.STREAM_READ);
+    gl.readPixels(0, 0, t.width, t.height, gl.RGBA, half ? gl.HALF_FLOAT : gl.FLOAT, 0);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    this.graph.pool.release(t);
+    if (!sync) { gl.deleteBuffer(buf); return; }
+    gl.flush();
+    this.atmPending = { buf, sync, w: t.width, h: t.height, half };
+  }
+
+  private pollAtm(): void {
+    const p = this.atmPending;
+    if (!p) return;
+    const gl = this.gl;
+    if (gl.getSyncParameter(p.sync, gl.SYNC_STATUS) !== gl.SIGNALED) return;
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, p.buf);
+    let px: Float32Array;
+    if (p.half) {
+      const u = new Uint16Array(p.w * p.h * 4);
+      gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, u);
+      px = Float32Array.from(u, halfToFloat);
+    } else {
+      px = new Float32Array(p.w * p.h * 4);
+      gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, px);
+    }
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    gl.deleteBuffer(p.buf);
+    gl.deleteSync(p.sync);
+    this.atmPending = null;
+    void import("./dehaze-atm").then(({ computeAtmosphere }) => { this.atm = computeAtmosphere(px, p.w, p.h); });
+  }
+
+  /** GPU↔CPU 프로브: RGBA16F, 디더 끔. points 는 (u,v) ∈ [0,1]², 결과는 점마다 RGBA 4개 */
+  probe(points: Array<[number, number]>, override: ProbeOverride = { grainAmount: 0 }): Float32Array {
+    if (!this.asset || !this.srcTex || !this.srcSize) throw renderErrors.noSource();
+    this.probeOverride = override;
+    try {
+      const R = this.renderSize();
+      const c = this.chainParams(R);
+      const r = this.graph.renderPreview(c, { kind: "probe" }, { value: this.atm, refresh: "none" }, () => undefined);
+      const t = r.probeTarget!;
+      const out = new Float32Array(points.length * 4);
+      const gl = this.gl;
+      points.forEach(([u, v], k) => {
+        const x = Math.min(R.width - 1, Math.floor(u * R.width));
+        const y = Math.min(R.height - 1, Math.floor(v * R.height));
+        const px = new Float32Array(4);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+        const type = gl.getParameter(gl.IMPLEMENTATION_COLOR_READ_TYPE) as number;
+        if (type === gl.HALF_FLOAT) {
+          const h = new Uint16Array(4);
+          gl.readPixels(x, y, 1, 1, gl.RGBA, gl.HALF_FLOAT, h);
+          for (let i = 0; i < 4; i++) px[i] = halfToFloat(h[i]!);
+        } else gl.readPixels(x, y, 1, 1, gl.RGBA, gl.FLOAT, px);
+        out.set(px, k * 4);
+      });
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      this.graph.pool.release(t);
+      return out;
+    } finally {
+      this.probeOverride = null;
+      this.lastChainSig = "";
+    }
+  }
+
+  /** 프로브와 같은 조건의 CPU 참조 컨텍스트 (섹션 15.1) */
+  referenceContext(override: ProbeOverride = { grainAmount: 0 }): { ctx: PixelCtx; R: Size } {
+    if (!this.asset) throw renderErrors.noSource();
+    this.probeOverride = override;
+    try {
+      const R = this.renderSize();
+      const e = this.effective();
+      const s = scalarUniforms(e);
+      const g = this.lutKey ? this.gpuLuts.get(this.lutKey) : undefined;
+      let lut: LutStageRef = { mode: 0 };
+      if (g?.flags) {
+        const names = ["srgb-display", "rec709-bt1886", "fsh-v1", "slog3-sgamut3cine"] as const;
+        lut = { mode: 2, size: g.cpu.size, data: g.cpu.data, domain: names[g.flags.domain]!, inVR: g.flags.inVR, outVR: g.flags.outVR, domMin: g.flags.min, domMax: g.flags.max };
+      } else if (g) lut = { mode: 1, size: g.cpu.size, data: g.cpu.data };
+      this.curve();
+      const ctx: PixelCtx = {
+        norm: this.normalizeUniforms(this.asset.descriptor).ctx,
+        ct: s.uCt, vig: s.uVig, aspect: R.width / R.height, lut, mono: e.mono, ke: s.uKe, kb: s.uKb,
+        curve: curveOn(this.params.curve) ? this.curveTable : null,
+        sat: s.uSat, vib: s.uVib,
+        grain: s.uGrainAmt > 0 ? { amount: s.uGrainAmt, scale: grainScalePreview(this.outLong(), Math.max(R.width, R.height), e.adjust.grainSize), off: grainOffset(0) } : null,
+      };
+      return { ctx, R };
+    } finally {
+      this.probeOverride = null;
+    }
+  }
+
+  // ── 원본 해상도 타일 (섹션 12) ───────────────────────────────────────────
+  async renderTile(req: { rect: { x: number; y: number; width: number; height: number }; outScale: number }): Promise<Uint8ClampedArray> {
+    const a = this.asset;
+    if (!a || a.kind === "video") throw renderErrors.noSource();
+    if (!this.lastR || this.lastChainSig !== this.chainSig(this.lastR)) throw renderErrors.stale();
+    const sig = this.lastChainSig;
+    const { rect, outScale } = req;
+    const disp = this.displaySize()!;
+    const outFull = { width: Math.round(disp.width * outScale), height: Math.round(disp.height * outScale) };
+    if (rect.width > 1024 || rect.height > 1024 || rect.x < 0 || rect.y < 0 || rect.x + rect.width > outFull.width || rect.y + rect.height > outFull.height) throw renderErrors.tileTooLarge();
+    const P = tilePadding(outFull);
+    // 실제 패딩: P 이상으로 넓혀 패딩 포함 원점·크기를 2^n_core 배수에 맞춘다. 타일마다 HDF core 피라미드
+    // (ceil(R/2ⁿ), 로컬 uv 샘플)가 전체 이미지와 같은 격자를 쓰게 해 이음새를 없앤다 (docs/RENDERER.md 구현 노트).
+    const al = 2 ** hdfPlan(outFull).core.level;
+    const px0 = Math.max(0, Math.floor((rect.x - P) / al) * al), py0 = Math.max(0, Math.floor((rect.y - P) / al) * al);
+    const px1 = Math.min(outFull.width, px0 + Math.ceil((rect.x + rect.width + P - px0) / al) * al);
+    const py1 = Math.min(outFull.height, py0 + Math.ceil((rect.y + rect.height + P - py0) / al) * al);
+    const sx0 = Math.max(0, Math.floor(px0 / outScale)), sy0 = Math.max(0, Math.floor(py0 / outScale));
+    const sx1 = Math.min(disp.width, Math.ceil(px1 / outScale)), sy1 = Math.min(disp.height, Math.ceil(py1 / outScale));
+    if (sx1 - sx0 > 2048 || sy1 - sy0 > 2048) throw renderErrors.tileTooLarge();
+    const tile = await getFullResolutionTile(a.id, { x: sx0, y: sy0, width: sx1 - sx0, height: sy1 - sy0 });
+    if (this.asset !== a || this.lastChainSig !== sig) throw renderErrors.stale();
+    const gl = this.gl;
+    const tex = createTex2D(gl, tile.width, tile.height, gl.RGBA16F, gl.RGBA, gl.FLOAT, gl.LINEAR, tile.data);
+    try {
+      const Rt = { width: px1 - px0, height: py1 - py0 };
+      const base = this.chainParams(this.lastR);
+      const e = this.effective();
+      base.R = Rt;
+      base.grain = { scale: grainScaleFull(Math.max(outFull.width, outFull.height), e.adjust.grainSize), off: grainOffset(0) };
+      const out = this.graph.renderTile({
+        base, R: Rt, imageSize: outFull, tileOrigin: [px0, py0], crop: [rect.x - px0, rect.y - py0], imgPxOrigin: [rect.x, rect.y],
+        out: { width: rect.width, height: rect.height }, hdfPlan: hdfPlan(outFull), atm: this.atm,
+      }, tex, { width: tile.width, height: tile.height });
+      return new Uint8ClampedArray(out.buffer);
+    } finally {
+      gl.deleteTexture(tex);
+    }
+  }
+
+  // ── 비디오 제어 ───────────────────────────────────────────────────────────
+  readonly video = {
+    play: async (): Promise<void> => { await this.videoSrc?.play(); },
+    pause: (): void => { this.videoSrc?.pause(); },
+    seek: (t: number): void => { this.videoSrc?.seek(t); },
+    stats: (): VideoStats => this.videoSrc?.stats() ?? { presentedFps: 0, dropped: 0, tier: 1 },
+    element: (): HTMLVideoElement | null => this.videoSrc?.video ?? null,
+  };
+
+  info(): RendererInfo {
+    const R = this.lastR;
+    const sz = R && this.asset ? graphSizes(R, this.asset.kind === "video" ? "video" : "photo") : null;
+    let pi: number | null = null;
+    try { pi = this.asset ? this.profileIndex(this.asset.descriptor) : null; } catch { pi = null; }
+    return {
+      R, A: sz?.A ?? null, D: sz?.D ?? null, profileIndex: pi, orient: this.srcOrient, srcSize: this.srcSize, atm: this.atm,
+      lutKey: this.lutKey, sourceLutName: this.sourceLut?.flags?.name ?? (this.sourceLutMissing ? "(없음)" : null),
+      orientationProbe: this.orientProbe, chainVersion: this.chainVersion,
+    };
+  }
+
+  /** 섹션 10.2 결과를 미리 확인한다 (검증 화면용) */
+  runOrientationProbe(): Promise<OrientationProbeResult> {
+    return probeVideoOrientation(this.graph);
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.resizeObs?.disconnect();
+    this.releaseSource();
+    this.canvas.removeEventListener("webglcontextlost", this.onLost);
+    this.canvas.removeEventListener("webglcontextrestored", this.onRestored);
+    for (const g of this.gpuLuts.values()) this.gl.deleteTexture(g.tex);
+    this.gpuLuts.clear();
+    if (this.curveTex) this.gl.deleteTexture(this.curveTex);
+    if (this.toneInvTex) this.gl.deleteTexture(this.toneInvTex);
+    this.graph.dispose();
+    this.asset = null;
+  }
+}

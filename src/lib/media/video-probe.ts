@@ -2,7 +2,7 @@ import { ascii, u16be, u32be, u64be } from "./binary";
 import { parseEbml } from "./ebml";
 import { errors } from "./errors";
 import { children, find, metaChildrenOffset, payload, readBoxes, type Box } from "./isobmff";
-import type { VideoInfo } from "./types";
+import type { VideoInfo, VideoRotation } from "./types";
 
 export interface VideoConfigBox { kind: "avcC" | "hvcC"; payload: Uint8Array }
 export interface FirstSample { offset: number; size: number; keyFirst: boolean }
@@ -11,6 +11,7 @@ export interface Mp4Probe {
   hasAudio: boolean; audioCodec: string | null; audioSampleRate: number | null;
   colour: VideoInfo["colour"]; make: string | null; model: string | null; creationTime: string | null;
   config: VideoConfigBox | null; firstSample: FirstSample | null;
+  rotation: VideoRotation;
 }
 export interface ProbeResult {
   info: VideoInfo; metaText: string; config: VideoConfigBox | null; firstSample: FirstSample | null;
@@ -96,6 +97,43 @@ function metaMakeModel(b: Uint8Array, moov: Box): { make: string | null; model: 
   };
 }
 
+/**
+ * Step 3 섹션 10.1 — tkhd 행렬 → EXIF 동등 방향 (QuickTime x' = a·x + c·y, y' = b·x + d·y).
+ * s = sqrt(a²+b²), (A,B,C,D) = 각 값/s 를 반올림해 {−1,0,1}. 표 밖이면 1 + unsupported(경고 ROTATION_UNSUPPORTED).
+ */
+export function orientationFromMatrix(a: number, b: number, c: number, d: number): { orientation: number; unsupported: boolean } {
+  const s = Math.sqrt(a * a + b * b);
+  if (!(s > 0)) return { orientation: 1, unsupported: true };
+  const q = (v: number) => {
+    const r = Math.round(v / s);
+    return r === 0 ? 0 : r; // −0 정리
+  };
+  const key = [q(a), q(b), q(c), q(d)].join(",");
+  const table: Record<string, number> = {
+    "1,0,0,1": 1, "-1,0,0,1": 2, "-1,0,0,-1": 3, "1,0,0,-1": 4,
+    "0,1,1,0": 5, "0,1,-1,0": 6, "0,-1,1,0": 8, "0,-1,-1,0": 7,
+  };
+  const o = table[key];
+  return o === undefined ? { orientation: 1, unsupported: true } : { orientation: o, unsupported: false };
+}
+
+const i32be = (b: Uint8Array, o: number) => (u32be(b, o) | 0);
+
+/** tkhd 박스(헤더 포함 시작 기준): v0 행렬 48~84 폭 84~88 높이 88~92, v1 행렬 60~96 폭 96~100 높이 100~104 */
+export function parseTkhdRotation(b: Uint8Array, box: Box): VideoRotation {
+  const v1 = b[box.start + 8] === 1;
+  const m = box.start + (v1 ? 60 : 48);
+  const a = i32be(b, m), bb = i32be(b, m + 4), c = i32be(b, m + 12), d = i32be(b, m + 16);
+  const codedWidth = u32be(b, box.start + (v1 ? 96 : 84)) / 65536;
+  const codedHeight = u32be(b, box.start + (v1 ? 100 : 88)) / 65536;
+  return { matrix: [a, bb, c, d], orientation: orientationFromMatrix(a, bb, c, d).orientation, codedWidth, codedHeight };
+}
+
+/** 표시 크기 = orientation ∈ 5~8 ? (codedHeight, codedWidth) : (codedWidth, codedHeight) */
+export function displaySizeOf(r: VideoRotation): { width: number; height: number } {
+  return r.orientation >= 5 ? { width: r.codedHeight, height: r.codedWidth } : { width: r.codedWidth, height: r.codedHeight };
+}
+
 const PRORES = new Set(["apch", "apcn", "apcs", "apco", "ap4h", "ap4x"]);
 
 /** moov 박스 전체(헤더 포함, 오프셋 0)를 파싱한다. */
@@ -111,10 +149,12 @@ export function parseMoov(b: Uint8Array): Mp4Probe {
   const out: Mp4Probe = {
     codecFourcc: "", codec: "", width: 0, height: 0, fps: 0, durationSec: 0, bitDepth: 8, hasAudio: false, audioCodec: null, audioSampleRate: null,
     colour: { primaries: null, transfer: null, matrix: null, fullRange: null }, make: null, model: null, creationTime, config: null, firstSample: null,
+    rotation: { matrix: [65536, 0, 0, 65536], orientation: 1, codedWidth: 0, codedHeight: 0 },
   };
   let gotVideo = false;
   for (const trak of kids.filter((k) => k.type === "trak")) {
-    const mdia = find(children(b, trak), "mdia");
+    const tk = children(b, trak);
+    const mdia = find(tk, "mdia");
     if (!mdia) continue;
     const mk = children(b, mdia);
     const hdlr = find(mk, "hdlr");
@@ -138,6 +178,8 @@ export function parseMoov(b: Uint8Array): Mp4Probe {
     }
     if (handler !== "vide" || gotVideo) continue;
     gotVideo = true;
+    const tkhd = find(tk, "tkhd");
+    if (tkhd) out.rotation = parseTkhdRotation(b, tkhd);
     out.codecFourcc = entry.type;
     out.width = u16be(b, entry.start + 32);
     out.height = u16be(b, entry.start + 34);
@@ -216,6 +258,7 @@ export async function probeVideo(file: Blob, container: "mp4" | "mov" | "webm"):
         container, codec: c.codec, codecFourcc: c.fourcc, width: e.width, height: e.height, fps: e.fps, durationSec: e.durationSec, bitDepth: e.bitDepth,
         hasAudio: e.hasAudio, audioCodec: e.audioCodec, audioSampleRate: e.audioSampleRate, colour: e.colour, make: null, model: null, creationTime: null,
         bitrateBps: bitrate, playback4k60: null,
+        rotation: { matrix: [65536, 0, 0, 65536], orientation: 1, codedWidth: e.width, codedHeight: e.height },
       },
     };
   }
@@ -249,6 +292,7 @@ export async function probeVideo(file: Blob, container: "mp4" | "mov" | "webm"):
       container, codec: p.codec, codecFourcc: p.codecFourcc, width: p.width, height: p.height, fps: p.fps, durationSec: p.durationSec, bitDepth: p.bitDepth,
       hasAudio: p.hasAudio, audioCodec: p.audioCodec, audioSampleRate: p.audioSampleRate, colour: p.colour, make: p.make, model: p.model,
       creationTime: p.creationTime, bitrateBps: bitrate, playback4k60: null,
+      rotation: p.rotation.codedWidth > 0 ? p.rotation : { ...p.rotation, codedWidth: p.width, codedHeight: p.height },
     },
   };
 }
