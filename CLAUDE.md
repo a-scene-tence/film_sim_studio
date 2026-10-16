@@ -30,6 +30,7 @@
 10. 공개 API 는 src/lib/media-loader.ts, src/lib/exif-manager.ts 두 파사드다. UI 는 내부 모듈을 직접 import 하지 않는다.
 11. libraw-wasm 은 /vendor/libraw-wasm/1.6.0/ 정적 경로 + nativeImport 로만 로드한다. crossOriginIsolated 가 아니면 RAW 는 내장 프리뷰 전용으로 연다.
 12. 활성 미디어는 1개다. 새 파일을 열면 이전 자산의 ImageBitmap·버퍼·LibRaw 인스턴스를 즉시 해제한다.
+13. 셰이더를 수정하면 tests/render.shaders.test.ts 와 /lab/renderer 의 GPU↔CPU 프로브가 모두 PASS 여야 한다.
 
 ## 3. 기술 스택 (설치된 실제 버전)
 - next 16.4.2, react 19.3.0, typescript 5.9.3, tailwindcss 4.3.3, idb 8.0.4, fast-png 8.0.0, libraw-wasm 1.6.0, heic2any 0.0.4, exifr 7.1.3, piexifjs 1.0.6, vitest 5.0.5, Node 22.22.0
@@ -50,12 +51,26 @@
 - scripts/vendor-libraw.mjs [S2] (public/vendor/ 는 설치 시 생성, 커밋 금지), public/licenses/THIRD_PARTY.txt [S2], docs/MEDIA_PIPELINE.md [S2]
 - tests/fixtures/exif-ii.jpg.b64 [S2], tests/helpers/ [S2]
 - src/sw/ + manifest.webmanifest [S4]
-- src/lib/gl/ (WebGL2 패스, GLSL ES 3.00) [S3], src/components/editor/ [S3]
+- src/lib/render/ (WebGL2 멀티패스 렌더러, glsl/ = GLSL ES 3.00 정본, docs/RENDERER.md) [S3], src/components/editor/ [S3], src/app/lab/renderer/page.tsx [S3]
 - src/lib/video/ (WebCodecs/MediaRecorder, mux) [S4], src/lib/export/ [S4]
 - tests/ [S1+]
 
 ## 5. 렌더 파이프라인 (순서 고정, 수식은 docs/COLOR_SCIENCE.md)
-S0 소스 → WS 정규화(§4) → S1 HDF(§9) → S2 화이트밸런스(§8.1) → S3 노출 → S4 디헤이즈(§8.3) → S5 베이스 레이어 톤(§8.4) → S6 대비(§8.5) → S7 음수 제거 감마 압축(§8.6) → S8 필름 LUT(§5~7) → S9 컬러 크롬(§10) → S10 톤 커브(§8.7) → S11 채도/생동감(§8.8) → S12 명료도(§8.9) → S13 선명도(§8.10) → S14 비네팅(§8.11) → S15 그레인(§11) → S16 출력 디더(§8.12)
+S0 소스→WS: 디코드 → M_src→WS → Samsung 피부 보정 → 소프트 색역 압축 → 하이라이트 롤오프 → 화이트밸런스(Bradford) → 노출 2^EV
+S1 HDF 이중 반경 광학 확산
+S2 디헤이즈
+S3 베이스 레이어 톤(라이트 밸런스, 쉐도우, 하이라이트, 흰색, 검정, 밝기)
+S4 대비
+S5 비네팅 cos⁴θ(장면 선형)
+S6 음수 제거
+S7 필름 3D LUT(사면체) 또는 원본(T_ref) 또는 외부 Look LUT
+S8 컬러 크롬 이펙트 / FX 블루
+S9 톤 커브(256×1)
+S10 채도/생동감
+S11 명료도
+S12 선명도(언샵 마스크)
+S13 그레인
+S14 디더·출력
 
 ## 6. 브라우저 기준
 - iOS Safari 16.4+, Android Chrome 120+.
@@ -79,8 +94,8 @@ S0 소스 → WS 정규화(§4) → S1 HDF(§9) → S2 화이트밸런스(§8.1)
 ## 10. 로드맵
 - Step 1: 초기화, 문서, FSE-v1 32종 LUT 생성기, 외부 .cube/HaldCLUT 업로더(파싱·저장·CPU 미리보기)
 - Step 2: 통합 미디어 로더(RAW/JPEG/PNG/WEBP/HEIC/MP4/MOV/WEBM, 프록시 2048 + 풀해상도 타일), Log 자동 감지, CPU 소스 정규화(§3·§4), EXIF 추출·표시·재삽입 엔진(JPEG/PNG)
-- Step 3: WebGL2 멀티패스 렌더러(S0~S16) + 편집 UI(브랜드 탭, 원터치 시뮬레이션, HDF 토글, 컬러 크롬, 그레인, 보정 슬라이더, 톤 커브)
-- Step 4: 비디오(Log 감지 배지, 4K60 프리뷰, 오디오 싱크 인코딩) + 저장 모달(원본/압축, 예상 용량) + EXIF 재삽입 + Web Share, PWA(Service Worker 프리캐시: 앱 셸, /luts/bin, /luts/manifest.json, /vendor/libraw-wasm/1.6.0/*)
+- Step 3: WebGL2 멀티패스 렌더러(사진 프록시·원본 타일, 비디오 실시간), Log CST, 원터치 마스터 레시피, /lab/renderer
+- Step 4: 메인 편집 화면(/lab/renderer 승격), 저장 모달(원본/압축, 예상 용량), EXIF 재삽입 연결, Web Share, 비디오 내보내기, PWA(Service Worker 프리캐시)
 
 ## 11. 정직성 메모
 - 후지필름·리코의 내부 이미지 처리 알고리즘은 비공개다. FSE-v1 파라미터는 공개 특성 기반 기준값 v1 이며, 실기 SOOC 동일성은 docs/COLOR_SCIENCE.md §14 보정 프로토콜(실기 RAW+JPEG 쌍 측정)로 수렴시킨다.
