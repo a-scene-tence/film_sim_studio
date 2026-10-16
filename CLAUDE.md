@@ -2,6 +2,7 @@
 
 ## 0. 이 문서의 지위
 - 이 저장소에서 일하는 Claude Code의 최상위 규칙. 우선순위: 사용자의 명시적 지시 > CLAUDE.md > docs/COLOR_SCIENCE.md > 그 밖의 판단.
+- Step 4 SSOT: docs/STUDIO.md(UI·저장·PWA), docs/COLOR_SCIENCE.md 의 §16(Samsung Log, D-Log M Proxy, Film Strength, Mono Toning, HDF Strength, FLA-v1 Auto Light, Histogram, Area Downsample).
 - 색·톤·LUT·셰이더 코드를 작성하거나 수정하기 전에 docs/COLOR_SCIENCE.md 의 해당 절을 반드시 읽는다. 문서에 없는 수식이나 상수가 필요하면 구현을 멈추고 사용자에게 수식 확정을 요청한다. 추정 상수, 대체 알고리즘, 단계 누락은 금지한다.
 - 필름 룩을 바꾸는 유일한 경로: src/lib/color/fse/film-params.mjs 수치 수정 → npm run luts → 골든 테스트값 갱신 → 커밋 메시지에 근거 기록. FSE-v1 엔진 수식 변경은 사용자 승인 후 FSE-v2 로 버전을 올려서만 한다.
 
@@ -32,6 +33,8 @@
 11. libraw-wasm 은 /vendor/libraw-wasm/1.6.0/ 정적 경로 + nativeImport 로만 로드한다. crossOriginIsolated 가 아니면 RAW 는 내장 프리뷰 전용으로 연다.
 12. 활성 미디어는 1개다. 새 파일을 열면 이전 자산의 ImageBitmap·버퍼·LibRaw 인스턴스를 즉시 해제한다.
 13. 셰이더를 수정하면 tests/render.shaders.test.ts 와 /lab/renderer 의 GPU↔CPU 프로브가 모두 PASS 여야 한다.
+14. 배포: Vercel 은 vercel.json 의 framework:null + outputDirectory:'out' 으로 정적 배포한다. next.config 의 output:'export', trailingSlash:false, images.unoptimized:true 를 바꾸지 않는다.
+15. 서비스워커: out/sw.js 는 scripts/build-sw.mjs 가 scripts/sw-template.js 로 생성한다. 생성물을 손으로 고치지 않는다.
 
 ## 3. 기술 스택 (설치된 실제 버전)
 - next 16.4.2, react 19.3.0, typescript 5.9.3, tailwindcss 4.3.3, idb 8.0.4, fast-png 8.0.0, libraw-wasm 1.6.0, heic2any 0.0.4, exifr 7.1.3, piexifjs 1.0.6, vitest 5.0.5, Node 22.22.0
@@ -51,9 +54,9 @@
 - src/workers/media-decode.worker.ts [S2], src/app/lab/media/page.tsx [S2]
 - scripts/vendor-assets.mjs [S2, S4 일반화] (public/vendor/ 는 설치 시 생성, 커밋 금지), public/licenses/THIRD_PARTY.txt [S2], docs/MEDIA_PIPELINE.md [S2]
 - tests/fixtures/exif-ii.jpg.b64 [S2], tests/helpers/ [S2]
-- src/sw/ + manifest.webmanifest [S4]
+- src/app/manifest.ts, src/app/not-found.tsx, public/icons/, public/demo/ [S4], scripts/build-sw.mjs + sw-template.js, serve-out.mjs, check-export.mjs, generate-icons.mjs, generate-demo.mjs [S4], vercel.json [S4]
 - src/lib/render/ (WebGL2 멀티패스 렌더러, glsl/ = GLSL ES 3.00 정본, docs/RENDERER.md) [S3], src/components/editor/ [S3], src/app/lab/renderer/page.tsx [S3]
-- src/lib/video/ (WebCodecs/MediaRecorder, mux) [S4], src/lib/export/ [S4]
+- src/lib/studio/ (편집 상태·레시피·자동 보정·히스토그램·제스처) [S4], src/components/studio/ (모바일 스튜디오 UI) [S4], src/lib/export/ (사진·동영상 저장, mediabunny, mozjpeg) [S4], src/workers/export.worker.ts [S4], src/lib/pwa/ [S4], docs/STUDIO.md [S4]
 - tests/ [S1+]
 
 ## 5. 렌더 파이프라인 (순서 고정, 수식은 docs/COLOR_SCIENCE.md)
@@ -100,4 +103,4 @@ S14 디더·출력
 
 ## 11. 정직성 메모
 - 후지필름·리코의 내부 이미지 처리 알고리즘은 비공개다. FSE-v1 파라미터는 공개 특성 기반 기준값 v1 이며, 실기 SOOC 동일성은 docs/COLOR_SCIENCE.md §14 보정 프로토콜(실기 RAW+JPEG 쌍 측정)로 수렴시킨다.
-- Samsung Log, DJI D-Log M 은 공개 폐형식 수식을 확보하지 못했으므로 제조사 공식 변환 LUT 경로(§4.12)로 처리한다. 상수 추정 금지.
+- Samsung Log 는 공식 백서 수식을 내장한다(COLOR_SCIENCE §16.1). DJI D-Log M 은 공개 수식이 없어 D-Log 곡선 + D-Gamut 근사를 내장하고 UI 에 "근사" 를 표시한다(§16.2). 사용자가 공식 변환 LUT 를 등록하면 LUT 가 우선한다. 상수 추정 금지.
