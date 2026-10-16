@@ -1,20 +1,24 @@
 /// <reference lib="webworker" />
 // Step 4 §10-4(3) 내보내기 워커: JPEG(mozjpeg WASM)·PNG 인코드, 선형광 스트리밍 다운샘플, EXIF 재삽입·검증.
 import { AreaDownsampler } from "../lib/export/area-downsample";
+import { renderFramed } from "../lib/export/frame-render";
+import type { FrameLayout, FrameText, FrameTheme } from "../lib/export/frame";
 import { encodeJpeg, encodePng, initJpeg } from "../lib/export/photo-encode";
 import { inspectOutputExif, insertExifIntoJpeg, insertExifIntoPng, type ExifPayload } from "../lib/exif-manager";
 import type { EncodeOptions } from "@jsquash/jpeg/meta.js";
 
 const MOZJPEG_WASM_URL = "/vendor/jsquash-jpeg/1.6.0/mozjpeg_enc.wasm";
 type Fmt = "jpeg" | "png";
+/** Step 5: 사진 아래·주변에 EXIF 여백 프레임을 합성한다 */
+export interface FramePayload { layout: FrameLayout; theme: FrameTheme; text: FrameText }
 
 export type ExportRequest =
   | { id: number; type: "init" }
-  | { id: number; type: "encode-full"; rgba: ArrayBuffer; w: number; h: number; format: Fmt; options: EncodeOptions }
+  | { id: number; type: "encode-full"; rgba: ArrayBuffer; w: number; h: number; format: Fmt; options: EncodeOptions; frame?: FramePayload }
   | { id: number; type: "down-begin"; W: number; H: number; W2: number; H2: number }
   | { id: number; type: "down-band"; rows: ArrayBuffer; y0: number; rowCount: number }
-  | { id: number; type: "down-end"; format: Fmt; options: EncodeOptions }
-  | { id: number; type: "estimate"; rgba: ArrayBuffer; w: number; h: number; format: Fmt; options: EncodeOptions }
+  | { id: number; type: "down-end"; format: Fmt; options: EncodeOptions; frame?: FramePayload }
+  | { id: number; type: "estimate"; rgba: ArrayBuffer; w: number; h: number; format: Fmt; options: EncodeOptions; frame?: FramePayload }
   | { id: number; type: "exif"; bytes: ArrayBuffer; format: Fmt; payload: ExifPayload; outSize: { width: number; height: number } };
 
 export type ExportResponse =
@@ -42,7 +46,11 @@ function ensureInit(): Promise<void> {
   return ready;
 }
 
-async function encode(rgba: Uint8ClampedArray, w: number, h: number, format: Fmt, options: EncodeOptions): Promise<Uint8Array> {
+async function encode(rgba: Uint8ClampedArray, w: number, h: number, format: Fmt, options: EncodeOptions, frame?: FramePayload): Promise<Uint8Array> {
+  if (frame) {
+    const f = renderFramed(rgba, w, h, frame.layout, frame.theme, frame.text);
+    rgba = f.rgba; w = f.width; h = f.height;
+  }
   if (format === "jpeg") { await ensureInit(); return encodeJpeg(rgba, w, h, options); }
   return encodePng(rgba, w, h);
 }
@@ -65,7 +73,7 @@ ctx.onmessage = async (ev: MessageEvent<ExportRequest>) => {
         post({ id: m.id, type: "done" });
         return;
       case "encode-full": {
-        const out = await encode(new Uint8ClampedArray(m.rgba), m.w, m.h, m.format, m.options);
+        const out = await encode(new Uint8ClampedArray(m.rgba), m.w, m.h, m.format, m.options, m.frame);
         done(m.id, out);
         return;
       }
@@ -85,11 +93,11 @@ ctx.onmessage = async (ev: MessageEvent<ExportRequest>) => {
         if (!down) throw new Error("다운샘플이 시작되지 않았습니다");
         const d = down;
         down = null;
-        done(m.id, await encode(d.out, d.W2, d.H2, m.format, m.options));
+        done(m.id, await encode(d.out, d.W2, d.H2, m.format, m.options, m.frame));
         return;
       }
       case "estimate": {
-        const out = await encode(new Uint8ClampedArray(m.rgba), m.w, m.h, m.format, m.options);
+        const out = await encode(new Uint8ClampedArray(m.rgba), m.w, m.h, m.format, m.options, m.frame);
         post({ id: m.id, type: "done", length: out.length });
         return;
       }

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { fmtBytes } from "@/lib/export/estimate";
 import { defaultPhotoOptions, estimatePhoto, exportPhoto, HOPELESS_MSG, MEMORY_MSG, planPhoto, type ExportJob, type ExportProgress, type PhotoExportOptions } from "@/lib/export/photo-export";
+import { defaultFrameOptions, type FrameLayout, type FrameTheme } from "@/lib/export/frame";
 import { outSize } from "@/lib/export/out-size";
 import { ExportCancelled, ExportClient } from "@/lib/export/worker-client";
 import { fpsLine, MSG_ORIGINAL_TOO_LARGE, MSG_RECORDER, MSG_VIDEO_TOO_LONG, progressLine } from "@/lib/export/video-plan";
@@ -20,6 +21,8 @@ export interface ExportModalProps {
   asset: MediaAsset | null;
   file: File | null;
   simId: string | null;
+  /** 프레임 배지 문구 (예: "FUJIFILM Classic Neg. + HDF") */
+  simLabel: string;
   renderer: FilmRenderer | null;
   params: RenderParams;
   /** 편집 상태 서명 (예상 용량 프록시 렌더 캐시 키) */
@@ -34,10 +37,39 @@ const chipCls = (on: boolean, disabled?: boolean) =>
 
 function Segment({ items, value, onChange }: { items: Array<[string, string]>; value: string; onChange(v: string): void }) {
   return (
-    <div role="tablist" className="flex h-11 overflow-hidden rounded-[10px] border border-[var(--line)]">
+    <div role="tablist" className="flex min-h-11 overflow-hidden rounded-[10px] border border-[var(--line)]">
       {items.map(([id, label]) => (
-        <button key={id} type="button" role="tab" aria-selected={value === id} className="flex-1 text-[14px]" style={value === id ? { background: "var(--panel-2)", color: "var(--accent)", fontWeight: 700 } : { color: "var(--text-2)" }} onClick={() => onChange(id)}>{label}</button>
+        <button key={id} type="button" role="tab" aria-selected={value === id} className="flex-1 px-1 py-1 text-[13px] leading-tight" style={value === id ? { background: "var(--panel-2)", color: "var(--accent)", fontWeight: 700 } : { color: "var(--text-2)" }} onClick={() => onChange(id)}>{label}</button>
       ))}
+    </div>
+  );
+}
+
+const THEMES: Array<[FrameTheme, string]> = [["white", "화이트(White)"], ["dark", "블랙(Dark)"]];
+const LAYOUTS: Array<[FrameLayout, string]> = [["bottom", "하단 여백형(Bottom Bar)"], ["polaroid", "4면 여백 폴라로이드형(4-Side Border)"]];
+
+/** Step 5 §1 EXIF 여백 프레임: ON/OFF 토글 + 배경 테마 + 레이아웃 */
+function FramePanel({ value, onChange }: { value: import("@/lib/export/frame").FrameOptions; onChange(v: import("@/lib/export/frame").FrameOptions): void }) {
+  return (
+    <div className="flex flex-col gap-2 rounded-[12px] border border-[var(--line)] p-3">
+      <button type="button" role="switch" aria-checked={value.enabled} aria-label="EXIF 여백 프레임 추가" className="flex min-h-11 items-center justify-between text-left text-[14px]" onClick={() => onChange({ ...value, enabled: !value.enabled })}>
+        <span>EXIF 여백 프레임 추가</span>
+        <span className="flex items-center gap-2 text-[13px]" style={{ color: value.enabled ? "var(--accent)" : "var(--text-2)" }}>
+          {value.enabled ? "ON" : "OFF"}
+          <span className="flex h-6 w-11 items-center rounded-full px-0.5" style={{ background: value.enabled ? "var(--accent)" : "var(--line)", justifyContent: value.enabled ? "flex-end" : "flex-start" }}>
+            <span className="h-5 w-5 rounded-full bg-white" />
+          </span>
+        </span>
+      </button>
+      {value.enabled ? (
+        <div className="flex flex-col gap-2">
+          <p className="text-[12px] text-[var(--text-2)]">배경 테마</p>
+          <Segment items={THEMES} value={value.theme} onChange={(v) => onChange({ ...value, theme: v as FrameTheme })} />
+          <p className="text-[12px] text-[var(--text-2)]">레이아웃</p>
+          <Segment items={LAYOUTS} value={value.layout} onChange={(v) => onChange({ ...value, layout: v as FrameLayout })} />
+          <p className="text-[12px] text-[var(--text-2)]">바디·렌즈, 초점거리·조리개·셔터·ISO·촬영일시, 적용한 필름 이름을 하단에 각인합니다. 원본 EXIF 는 그대로 유지됩니다.</p>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -82,7 +114,7 @@ export function ExportModal(p: ExportModalProps) {
   }, [open, isVideo, file, assetId]);
 
   // 사진 예상 용량: 300ms 디바운스, 프록시를 RGBA8 로 한 번 렌더해 캐시
-  const optsKey = `${editKey}|${JSON.stringify(opts)}`;
+  const optsKey = `${editKey}|${JSON.stringify(opts)}|${p.simLabel}`;
   useEffect(() => {
     if (!open || isVideo || !asset || !renderer || phase !== "options") return;
     let alive = true;
@@ -90,7 +122,7 @@ export function ExportModal(p: ExportModalProps) {
       void (async () => {
         try {
           if (!snapshot.current || snapshot.current.key !== editKey) snapshot.current = { key: editKey, snap: renderer.snapshotPreview() };
-          const bytes = await estimatePhoto(getClient(), renderer, asset, opts, snapshot.current.snap);
+          const bytes = await estimatePhoto(getClient(), renderer, asset, opts, snapshot.current.snap, { summary: asset.exif?.summary, badge: p.simLabel });
           if (alive) setEst({ key: optsKey, bytes });
         } catch (e) {
           if (alive && !(e instanceof ExportCancelled)) setError(e instanceof Error ? e.message : String(e));
@@ -132,7 +164,7 @@ export function ExportModal(p: ExportModalProps) {
     onRunningChange(true);
     setProgress({ value: 0, phase: "render", tile: 0, tiles: 1 });
     try {
-      const r = await exportPhoto({ renderer, client: getClient(), asset, simId: p.simId, options: opts, job: job.current, start: new Date(), onProgress: setProgress });
+      const r = await exportPhoto({ renderer, client: getClient(), asset, simId: p.simId, options: opts, job: job.current, start: new Date(), onProgress: setProgress, frameInfo: { summary: asset.exif?.summary, badge: p.simLabel } });
       finish({ file: r.file, blob: r.blob, width: r.width, height: r.height, isVideo: false, warnings: [] });
     } catch (e) { fail(e); }
   };
@@ -254,6 +286,7 @@ export function ExportModal(p: ExportModalProps) {
             </label>
           </div>
         )}
+        <FramePanel value={opts.frame ?? defaultFrameOptions()} onChange={(frame) => setOpts((o) => ({ ...o, frame }))} />
         <p className="tnum text-[14px]">예상 용량 <span className="text-[var(--accent)]">{calculating ? "계산 중" : fmtBytes(estBytes ?? 0)}</span></p>
         <p className="text-[12px] text-[var(--text-2)]">EXIF 메타데이터 전체 유지 · 방향(Orientation)=1 로 저장</p>
         {photoPlan && !photoPlan.fits ? <p className="text-[12px] text-[var(--accent)]">{photoPlan.hopeless ? HOPELESS_MSG : MEMORY_MSG}</p> : null}

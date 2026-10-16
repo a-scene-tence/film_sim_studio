@@ -11,7 +11,7 @@ import type { ExportJob } from "./photo-export";
 import { ExportCancelled } from "./worker-client";
 import { recordViaMediaRecorder } from "./recorder-fallback";
 import {
-  audioPlan, estimateVideoBytes, fpsPlan, formatLine, has1080Option, NO_AUDIO, originalSize, pickContainerCodec, rotationToOrientation, video1080, videoBitrate, videoTooLarge,
+  planAudioSafe, estimateVideoBytes, fpsPlan, formatLine, has1080Option, NO_AUDIO, originalSize, pickContainerCodec, rotationToOrientation, video1080, videoBitrate, videoTooLarge,
   type AudioPlan, type CodecPick, type VideoCodecId,
 } from "./video-plan";
 
@@ -49,9 +49,11 @@ async function variantFor(vt: InputVideoTrack, at: InputAudioTrack | null, width
   let audio: AudioPlan = NO_AUDIO;
   let srcAudioBitrate: number | null = null;
   if (at && (pick.container === "mp4" || pick.container === "webm")) {
-    const fmt = pick.container === "mp4" ? new Mp4OutputFormat({ fastStart: "in-memory" }) : new WebMOutputFormat();
-    audio = audioPlan(pick.container, await at.getCodec(), await audioCaps(at, fmt.getSupportedAudioCodecs()));
-    srcAudioBitrate = await at.getBitrate();
+    const container = pick.container;
+    const fmt = container === "mp4" ? new Mp4OutputFormat({ fastStart: "in-memory" }) : new WebMOutputFormat();
+    // 오디오 탐지 실패가 영상 저장을 막지 않는다 (무음 저장 + 경고)
+    audio = await planAudioSafe(true, container, async () => ({ codec: await at.getCodec(), caps: await audioCaps(at, fmt.getSupportedAudioCodecs()) }));
+    srcAudioBitrate = await at.getBitrate().catch(() => null);
   }
   const estBytes = estimateVideoBytes(B, audio, srcAudioBitrate, duration);
   return { width, height, bitrate: B, pick, audio, estBytes, tooLarge: videoTooLarge(estBytes, budget), line: formatLine(pick, audio) };
@@ -127,7 +129,8 @@ async function highSpeed(a: VideoArgs): Promise<VideoResult> {
   try {
     const vt = await input.getPrimaryVideoTrack();
     if (!vt) throw new Error("영상 트랙을 찾지 못했습니다 — 다른 파일로 다시 시도하세요");
-    const at = await input.getPrimaryAudioTrack();
+    // 무음 영상: 오디오 트랙이 없거나 이번 저장에서 쓰지 않으면(audio.mode === "none") 비디오 스트림만 인코딩한다
+    const at = v.audio.mode === "none" ? null : await input.getPrimaryAudioTrack();
     const orient = rotationToOrientation(await vt.getRotation(), await vt.getFlip());
     const t0 = await input.getFirstTimestamp();
     const tEnd = await input.computeDuration();
@@ -142,7 +145,7 @@ async function highSpeed(a: VideoArgs): Promise<VideoResult> {
     output.addVideoTrack(vsrc, plan.resample ? { frameRate: 60 } : {});
     let acopy: EncodedAudioPacketSource | null = null;
     let atrans: AudioSampleSource | null = null;
-    const ac = at ? await at.getCodec() : null;
+    const ac = at && v.audio.mode === "copy" ? await at.getCodec() : null;
     if (at && v.audio.mode === "copy" && ac) { acopy = new EncodedAudioPacketSource(ac); output.addAudioTrack(acopy); }
     else if (at && v.audio.mode === "transcode" && v.audio.codec) { atrans = new AudioSampleSource({ codec: v.audio.codec as AudioCodec, quality: new Quality({ bitrate: 192000 }) }); output.addAudioTrack(atrans); }
     try { output.setMetadataTags(await input.getMetadataTags()); } catch (e) { console.warn("메타데이터 태그를 복사하지 못했습니다", e); }

@@ -6,7 +6,9 @@ import { PROFILE_LABEL } from "@/lib/render/binding";
 import { loadManifest } from "@/lib/render/luts";
 import { FilmRenderer } from "@/lib/render/renderer";
 import { RenderError } from "@/lib/render/gl";
+import { OUTPUT_SPACE_KEY, parseOutputSpace, type OutputSpace } from "@/lib/render/output-space";
 import { isoFromSummary } from "@/lib/render/params";
+import { filmBadgeLabel } from "@/lib/export/frame";
 import { computeAutoLight } from "@/lib/studio/auto-light";
 import { autoProfile, badgeText, type InputChoice } from "@/lib/studio/input-profile";
 import { editReducer, getValue, initialEditState, selectSim, type ParamKey, type SimInfo, type TabId } from "@/lib/studio/state";
@@ -54,6 +56,8 @@ export default function Studio() {
   const [exportOpen, setExportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [compare, setCompare] = useState(false);
+  const [outSpace, setOutSpace] = useState<OutputSpace>("srgb");
+  const [p3Ok, setP3Ok] = useState(false);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [, setStatusTick] = useState(0);
   const [pauseSignal, setPauseSignal] = useState(0);
@@ -96,7 +100,13 @@ export default function Studio() {
     const restored = () => setCtxLost(false);
     c.addEventListener("webglcontextlost", lost);
     c.addEventListener("webglcontextrestored", restored);
-    queueMicrotask(() => setRenderer(r));
+    queueMicrotask(() => {
+      setRenderer(r);
+      // Step 5 §3: P3 를 쓸 수 있는 기기에서만 전환 UI 를 보이고, 저장된 선택(기본 sRGB)을 복원한다
+      const ok = r.supportsP3();
+      setP3Ok(ok);
+      if (ok) { const saved = parseOutputSpace(lsGet(OUTPUT_SPACE_KEY)); r.setOutputSpace(saved); setOutSpace(r.getOutputSpace()); }
+    });
     return () => {
       c.removeEventListener("webglcontextlost", lost);
       c.removeEventListener("webglcontextrestored", restored);
@@ -108,7 +118,7 @@ export default function Studio() {
   useEffect(() => {
     let alive = true;
     loadManifest().then((m) => {
-      if (alive) setSims([...m.sims].sort((a, b) => a.order - b.order).map((s): SimInfo => ({ id: s.id, ko: s.ko, brand: s.brand, mono: s.mono })));
+      if (alive) setSims([...m.sims].sort((a, b) => a.order - b.order).map((s): SimInfo => ({ id: s.id, ko: s.ko, en: s.en, brand: s.brand, mono: s.mono })));
     }).catch((e: unknown) => toast(e instanceof Error ? e.message : String(e)));
     return () => { alive = false; };
   }, [toast]);
@@ -119,6 +129,16 @@ export default function Studio() {
     if (renderer && asset) renderer.setParams(params);
   }, [renderer, asset, params]);
 
+  const changeOutSpace = useCallback((s: OutputSpace) => {
+    if (!renderer) return;
+    renderer.setOutputSpace(s);
+    const eff = renderer.getOutputSpace();
+    setOutSpace(eff);
+    lsSet(OUTPUT_SPACE_KEY, eff);
+    toast(eff === "display-p3" ? "화면 출력: Display P3 (저장 파일은 sRGB)" : "화면 출력: sRGB");
+  }, [renderer, toast]);
+
+  const frameLabel = useMemo(() => filmBadgeLabel(state.simId === null ? null : (sims.find((x) => x.id === state.simId) ?? null), state.hdf), [state.simId, state.hdf, sims]);
   const mono = simRecipe(state.simId, sims).mono;
 
   // ── 미디어 열기 ──────────────────────────────────────────────────────────
@@ -261,6 +281,7 @@ export default function Studio() {
           onFile={(f) => void openFile(f)} accept={ACCEPT_FALLBACK} badge={badge} badgeDisabled={isRaw} approximate={binding?.approximate ?? false}
           onBadge={() => setProfileOpen(true)} demo={isDemo} onExif={() => setExifOpen(true)} onSave={() => { setPauseSignal((n) => n + 1); setExportOpen(true); }}
           hasMedia={asset !== null} busy={loading !== null || exporting}
+          p3Available={p3Ok} outSpace={outSpace} onOutSpace={changeOutSpace}
         />
         <div className="studio-body">
           <Preview
@@ -298,7 +319,7 @@ export default function Studio() {
         />
         <ExifInspector key={asset?.id ?? "none"} open={exifOpen} onClose={() => setExifOpen(false)} asset={asset} file={file} demo={isDemo} />
         <ExportModal
-          open={exportOpen} onClose={() => setExportOpen(false)} asset={asset} file={file} simId={state.simId} renderer={renderer} params={params} editKey={editKey}
+          open={exportOpen} onClose={() => setExportOpen(false)} asset={asset} file={file} simId={state.simId} simLabel={frameLabel} renderer={renderer} params={params} editKey={editKey}
           toast={toast} onRunningChange={onExportRunning}
         />
         <ToastView item={toastItem} onDismiss={dismiss} />
