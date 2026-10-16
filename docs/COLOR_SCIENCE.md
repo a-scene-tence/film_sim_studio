@@ -22,6 +22,7 @@
 - 원색표 (xy, 백색 전부 D65)
   Rec.709/sRGB: R(0.640,0.330) G(0.300,0.600) B(0.150,0.060)
   Display P3: R(0.680,0.320) G(0.265,0.690) B(0.150,0.060)
+  Adobe RGB (1998): R(0.640,0.330) G(0.210,0.710) B(0.150,0.060), 전달함수 순수 감마 563/256 (= 2.19921875)
   Rec.2020 (Apple Log, F-Gamut, N-Log, HLG, Samsung Log 컨테이너): R(0.708,0.292) G(0.170,0.797) B(0.131,0.046)
   S-Gamut3.Cine: R(0.766,0.275) G(0.225,0.800) B(0.089,−0.087)
   S-Gamut3 / S-Gamut: R(0.730,0.280) G(0.140,0.855) B(0.100,−0.050)
@@ -29,6 +30,18 @@
   Panasonic V-Gamut: R(0.730,0.280) G(0.165,0.840) B(0.100,−0.030)
   DJI D-Gamut: R(0.710,0.310) G(0.210,0.880) B(0.090,−0.080)
   F-Gamut C: R(0.7347,0.2653) G(0.0263,0.9737) B(0.1173,−0.0224)
+
+### §3.1 M_src→709 골든 표 (±1e-6)
+- display-p3 [[1.224940,-0.224940,0],[-0.042057,1.042057,0],[-0.019638,-0.078636,1.098274]]
+- adobe-rgb [[1.398356,-0.398356,0],[0,1,0],[0,-0.042929,1.042929]]
+- rec2020 [[1.660491,-0.587641,-0.072850],[-0.124550,1.132900,-0.008349],[-0.018151,-0.100579,1.118730]]
+- s-gamut3-cine [[1.626947,-0.540139,-0.086809],[-0.178516,1.417941,-0.239425],[-0.044436,-0.195920,1.240356]]
+- s-gamut3 [[1.877915,-0.794169,-0.083746],[-0.176807,1.351000,-0.174193],[-0.026201,-0.148422,1.174623]]
+- cinema-gamut [[1.923861,-0.798761,-0.125101],[-0.204311,1.495899,-0.291588],[-0.023685,-0.420127,1.443812]]
+- v-gamut [[1.806576,-0.695697,-0.110879],[-0.170090,1.305955,-0.135865],[-0.025206,-0.154468,1.179674]]
+- d-gamut [[1.674723,-0.579789,-0.094934],[-0.098088,1.333984,-0.235896],[-0.040967,-0.242984,1.283951]]
+- f-gamut-c [[2.119851,-1.075705,-0.044146],[-0.230336,1.372442,-0.142106],[-0.014227,-0.150225,1.164452]]
+- M_709→XYZ = [[0.412391,0.357584,0.180481],[0.212639,0.715169,0.072192],[0.019331,0.119195,0.950532]]
 
 ## §4 소스 정규화 (S0) — 코드값 → WS
 ### §4.0 입력값 y 의 정의
@@ -88,12 +101,19 @@
 - v ≤ 0.5 이면 E = v²/3, 그 외 E = (exp((v − c)/a) + b)/12
 - x = E·(0.18/0.0481333333) (BT.2408: 18% 그레이 = HLG 38% 신호)
 
-### §4.11 SDR 표시 기준 소스 (JPEG/PNG/WEBP/HEIC SDR, Rec.709 비디오)
-- 이미지: d = srgbDec(v) (Display P3 도 같은 곡선). Rec.709 비디오: d = v^2.4 (BT.1886, 블랙 0).
-- 소스 원색 공간에서 채널별로 x_src = Tref⁻¹(d) 를 구한 뒤 M_src→WS 를 곱한다.
-- Tref⁻¹: d ≤ 0 → 0, d ≥ 1 → 2.04. 그 외 [0, 2.04] 구간 이분법 48회(m=(lo+hi)/2; tone(m,T_ref) < d 이면 lo=m 아니면 hi=m), 결과 (lo+hi)/2.
-- GPU 에서는 4096칸 R16F 테이블 table[i] = Tref⁻¹((i/4095)^2.4) 를 만들고 s = max(d,0)^(1/2.4) 좌표로 선형 샘플한다.
-- 골든: Tref⁻¹(srgbDec(0.5)) = 0.201706, Tref⁻¹(1) = 2.04
+### §4.11 SDR 이미지 디코드 규칙과 SDR 표시 기준 소스 정규화 (JPEG/PNG/WEBP/HEIC SDR, Rec.709 비디오)
+- 이미지 디코드 규칙 (docs/MEDIA_PIPELINE.md §8)
+  - 방향(Orientation)은 브라우저 자동 회전에 맡기지 않는다. 디코드 전에 EXIF 를 제거하고 §10.2 매핑을 직접 적용한다(이중 회전 차단). HEIC 는 irot/imir 가 디코드 단계에서 적용되므로 방향을 추가 적용하지 않는다.
+  - 알파 채널은 버리고 A=1 로 둔다.
+  - 브라우저 경로: 워커 시작 시 display-p3 캔버스 지원을 1회 탐지한다. 지원하면 캔버스 colorSpace "display-p3"(원색 display-p3), 아니면 "srgb". 브라우저가 내장 ICC(sRGB, P3, Adobe RGB 등)를 캔버스 공간으로 색 관리한다. 8bit 값 v = byte/255.
+  - 16bit PNG 는 fast-png 로 원값을 보존한다(v = val/65535). 원색은 임베디드 ICC desc 로 분류(소문자 비교: "p3" → display-p3, "srgb" → srgb, "adobe rgb"/"adobergb" → adobe-rgb, "2020" → rec2020, 그 외 srgb + 경고), 없으면 srgb.
+  - 전달함수는 srgb-image (Display P3 도 같은 곡선).
+- 정규화 식 (docs/MEDIA_PIPELINE.md §12.3)
+  - 이미지(srgb-image): x = Tref⁻¹(srgbDec(y)). Rec.709 비디오(rec709): x = Tref⁻¹(y^2.4) (BT.1886, 블랙 0).
+  - 소스 원색 공간에서 채널별로 x_src 를 구한 뒤 M_src→WS 를 곱한다.
+  - Tref⁻¹: d ≤ 0 → 0, d ≥ 1 → 2.04. 그 외 [0, 2.04] 구간 이분법 48회(m=(lo+hi)/2; tone(m,T_ref) < d 이면 lo=m 아니면 hi=m), 결과 (lo+hi)/2.
+  - GPU 에서는 4096칸 R16F 테이블 table[i] = Tref⁻¹((i/4095)^2.4) 를 만들고 s = max(d,0)^(1/2.4) 좌표로 선형 샘플한다.
+  - 골든: Tref⁻¹(srgbDec(0.5)) = 0.201706, Tref⁻¹(1) = 2.04
 
 ### §4.12 Samsung Log, DJI D-Log M
 - 공개 폐형식 수식을 확보하지 못했으므로 상수를 하드코딩하지 않는다.
@@ -106,15 +126,28 @@
 - h' = h + 4·w, C' = C·(1 − 0.04·w)
 - 선형으로 되돌린다. 4와 0.04는 실기 차트 측정 전 기본값이며 §14 보정 대상이다.
 
-### §4.14 RAW
-- 블랙 차감, 화이트 레벨로 1.0 정규화, as-shot WB 배율 적용 후 채널별 1.0 클립(하이라이트 마젠타 방지).
-- 카메라→XYZ(D65) 행렬(DNG ColorMatrix/ForwardMatrix 또는 디코더 cam_xyz)을 곱한 뒤 M_XYZ→709 를 곱한다.
-- 마지막에 K_raw = 2.04·2^(BaselineExposure, DNG 태그 없으면 0) 을 곱한다. 센서 포화가 T_ref 백색에 정확히 대응한다.
+### §4.14 RAW (docs/MEDIA_PIPELINE.md §9.3)
+- LibRaw 설정 (프록시용, 정확히 이 키들만 지정하고 나머지는 패키지 기본값)
+  { halfSize: true, useCameraWb: true, useAutoWb: false, useCameraMatrix: 1, outputColor: 1, outputBps: 16, gamm: [1, 1], noAutoBright: true, highlight: 0, userFlip: 0, userQual: 3, adjustMaximumThr: 0, expCorrec: false }
+- 의미: 카메라 WB, 카메라→sRGB(Rec.709 원색, D65) 선형 행렬, 16bit 선형, 자동 밝기 없음, 하이라이트 클립, 회전 없음.
+- 출력 v = d/65535 (센서 포화 = 1.0). 원색 srgb(= WS 원색), 전달함수 raw-linear.
+- K_raw = 2.04 × 2^BE, BE = metadata(true).color_data.dng_levels.baseline_exposure (유한수가 아니거나 DNG 가 아니면 0).
+  x = v · K_raw. 센서 포화가 T_ref 백색에 정확히 대응한다.
+- descriptor = { profile:"raw-linear", primaries:"srgb", range:"full", bitDepth:16, rawScale:K_raw }
 
-### §4.15 소스 판별 우선순위
-1. 컨테이너 색 태그(colr/nclx): transfer 18 → HLG, transfer 16(PQ) → 미지원 안내, transfer 1/6/14/15 → Rec.709.
-2. 제조사 메타데이터. 예: Sony NRT XML 의 CaptureGammaEquation / CaptureColorPrimaries. 실제 샘플 파일에서 문자열을 확인한 뒤 매핑표를 만든다.
-3. 미확정이면 Rec.709 로 열고 상단 배지에서 1탭 전환한다. 히스토그램 기반 추정은 "제안" 배지로만 띄우고 자동 적용하지 않는다.
+### §4.15 소스 판별 우선순위 (docs/MEDIA_PIPELINE.md §11.2, 위에서부터 처음 확정된 단계 사용)
+- A. 태그: transfer 18 → hlg(원색 rec2020, 자동 적용). transfer 16 → pq, 오류 PQ_UNSUPPORTED("HDR10(PQ) 영상은 지원하지 않습니다").
+- B. 메타데이터 문자열: 모든 최상위 박스(mdat, free, skip, wide 제외, 각 최대 8MB)를 ASCII 소문자로 바꿔 검색한다.
+  - Sony: /capturegammaequation\s+value\s*=\s*"([^"]+)"/ → g, /capturecolorprimaries\s+value\s*=\s*"([^"]+)"/ → p.
+    g 에 "s-log3" → slog3, "s-log2" → slog2, "hlg" → hlg, "rec709"·"itu709"·"s-cinetone" → rec709.
+    p 에 "s-gamut3-cine" 또는 "s-gamut3.cine" → s-gamut3-cine, 그 외 "s-gamut3" 또는 "s-gamut" → s-gamut3, "rec2020"·"itu2020" → rec2020, 없으면 프로파일 기본 원색.
+  - 일반 부분문자열(우선순위 순): "apple log"|"applelog" → applelog, "f-log2" → flog2, "f-log" → flog, "d-log m"|"d-log-m"|"dlog-m"|"dlogm" → dlogm, "d-log" → dlog, "c-log3"|"canon log 3"|"clog3" → clog3, "v-log" → vlog, "n-log" → nlog, "samsung log" → samsunglog.
+  - 자동 적용.
+- C. 파일명: 소문자, 확장자 제거, 공백·_·-·. 제거 후 토큰 순서 slog3, slog2, applelog, flog2, flog, dlogm, dlog, clog3, vlog, nlog, samsunglog, hlg. vlog, dlog 는 일반 단어와 겹치므로 제안(자동 적용 안 함), 나머지는 자동 적용.
+- D. 히스토그램 제안(자동 적용 안 함): logLike = p0_1 ≥ 0.025 && p99_9 ≤ 0.95 && 0.15 ≤ p50 ≤ 0.65 일 때 제조사(make, 없으면 메타 텍스트에서 samsung, apple, dji, sony, fujifilm, canon, panasonic, nikon 순 첫 일치)로 samsung→samsunglog, apple→applelog, dji→dlogm, sony→slog3, fujifilm→flog2, canon→clog3, panasonic→vlog, nikon→nlog. 제조사가 없으면 vBlack ≤ p0_1 + 0.01 인 프로파일을 vBlack 내림차순(동률은 표 순서)으로 후보를 만들어 첫 후보를 제안한다.
+- E. 기본: rec709 (원색 srgb), confidence "default".
+- 프로파일 표 (vBlack = 반사율 0 의 Full 확장 신호값, 기본 원색): slog3 0.0354 s-gamut3-cine | slog2 0.0300 s-gamut3 | flog 0.0354 rec2020 | flog2 0.0354 rec2020 | clog3 0.0731 cinema-gamut | vlog 0.0729 v-gamut | nlog 0.0722 rec2020 | dlog 0.0929 d-gamut | applelog 0.1505 rec2020 | hlg — rec2020 | samsunglog — LUT | dlogm — LUT
+- samsunglog/dlogm 은 requiresSourceLut=true (§4.12 경로).
 
 ## §5 FSH-v1 셰이퍼 (LUT 입력 인코딩)
 - 상수: C_S = 0.18·2^−7 = 0.00140625, X_MAX = 16, L_S = log2((X_MAX + C_S)/C_S)
