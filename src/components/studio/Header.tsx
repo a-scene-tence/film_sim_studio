@@ -1,5 +1,5 @@
 "use client";
-import { useRef } from "react";
+import { useRef, type PointerEvent } from "react";
 import type { OutputSpace } from "@/lib/render/output-space";
 import { IconInfo, IconOpen, IconRedo, IconUndo } from "./icons";
 
@@ -28,11 +28,25 @@ export interface HeaderProps {
   undoDepth?: number;
   onUndo?(): void;
   onRedo?(): void;
+  /** 되돌리기 길게 누르기(500ms) 또는 ▾ 버튼: 히스토리 타임라인 열기 */
+  onTimeline?(): void;
+  /** 타임라인에 보여줄 항목이 있는지 (되돌리기·다시 실행 가능 여부 포함) */
+  timelineAvailable?: boolean;
 }
+
+export const LONG_PRESS_MS = 500;
 
 /** Step 4 §7-3 ① 헤더: 높이 52px + safe-area 위쪽, 좌우 12px */
 export function Header(p: HeaderProps) {
   const input = useRef<HTMLInputElement>(null);
+  const press = useRef<{ timer: ReturnType<typeof setTimeout> | null; fired: boolean }>({ timer: null, fired: false });
+  const cancelPress = () => { if (press.current.timer) clearTimeout(press.current.timer); press.current.timer = null; };
+  const startPress = (e: PointerEvent) => {
+    if (e.button > 0 || !p.timelineAvailable || !p.onTimeline) return;
+    press.current.fired = false;
+    cancelPress();
+    press.current.timer = setTimeout(() => { press.current.timer = null; press.current.fired = true; p.onTimeline?.(); }, LONG_PRESS_MS);
+  };
   return (
     <header className="flex shrink-0 items-center gap-2 bg-[var(--bg)] px-3" style={{ height: "calc(52px + env(safe-area-inset-top))", paddingTop: "env(safe-area-inset-top)" }}>
       <button type="button" disabled={p.busy} className="flex h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[10px] px-2 text-[14px] text-[var(--text)] disabled:opacity-50" onClick={() => input.current?.click()}>
@@ -61,7 +75,10 @@ export function Header(p: HeaderProps) {
       <div className="flex-1" />
       <button
         type="button" aria-label={p.undoLabel ? `되돌리기: ${p.undoLabel}` : "되돌리기"} title="되돌리기 (Ctrl/⌘+Z)" disabled={!p.undoLabel || p.busy}
-        className="relative flex h-11 w-11 shrink-0 items-center justify-center text-[var(--accent)] transition-opacity disabled:text-[var(--text)] disabled:opacity-30" onClick={p.onUndo}
+        className="relative flex h-11 w-11 shrink-0 select-none items-center justify-center text-[var(--accent)] transition-opacity disabled:text-[var(--text)] disabled:opacity-30"
+        style={{ touchAction: "manipulation", WebkitTouchCallout: "none" }}
+        onPointerDown={startPress} onPointerUp={cancelPress} onPointerLeave={cancelPress} onPointerCancel={cancelPress} onContextMenu={(e) => e.preventDefault()}
+        onClick={() => { if (press.current.fired) { press.current.fired = false; return; } p.onUndo?.(); }}
       >
         <IconUndo />
         {p.undoLabel && (p.undoDepth ?? 0) > 0 ? (
@@ -73,6 +90,12 @@ export function Header(p: HeaderProps) {
         className="flex h-11 w-11 shrink-0 items-center justify-center text-[var(--accent)] transition-opacity disabled:text-[var(--text)] disabled:opacity-30" onClick={p.onRedo}
       >
         <IconRedo />
+      </button>
+      <button
+        type="button" aria-label="변경 내역 보기" title="변경 내역 (되돌리기 길게 누르기)" disabled={!p.timelineAvailable || p.busy}
+        className="-ml-2 flex h-11 w-7 shrink-0 items-center justify-center text-[var(--text)] transition-opacity disabled:opacity-30" onClick={p.onTimeline}
+      >
+        <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
       </button>
       <button type="button" aria-label="EXIF 정보" disabled={!p.hasMedia} className="flex h-11 w-11 items-center justify-center text-[var(--text)] disabled:opacity-40" onClick={p.onExif}><IconInfo /></button>
       <button type="button" disabled={!p.hasMedia || p.busy} className="flex h-11 shrink-0 items-center disabled:opacity-40" onClick={p.onSave}>
