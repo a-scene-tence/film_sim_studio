@@ -4,7 +4,7 @@
 - 이 저장소에서 일하는 Claude Code의 최상위 규칙. 우선순위: 사용자의 명시적 지시 > CLAUDE.md > docs/COLOR_SCIENCE.md > 그 밖의 판단.
 - Step 4 SSOT: docs/STUDIO.md(UI·저장·PWA), docs/COLOR_SCIENCE.md 의 §16(Samsung Log, D-Log M Proxy, Film Strength, Mono Toning, HDF Strength, FLA-v1 Auto Light, Histogram, Area Downsample).
 - 색·톤·LUT·셰이더 코드를 작성하거나 수정하기 전에 docs/COLOR_SCIENCE.md 의 해당 절을 반드시 읽는다. 문서에 없는 수식이나 상수가 필요하면 구현을 멈추고 사용자에게 수식 확정을 요청한다. 추정 상수, 대체 알고리즘, 단계 누락은 금지한다.
-- 필름 룩을 바꾸는 유일한 경로: src/lib/color/fse/film-params.mjs 수치 수정 → npm run luts → 골든 테스트값 갱신 → 커밋 메시지에 근거 기록. FSE-v1 엔진 수식 변경은 사용자 승인 후 FSE-v2 로 버전을 올려서만 한다.
+- 필름 룩을 바꾸는 유일한 경로: src/lib/color/fse/film-params.mjs 수치 수정 → npm run luts → 골든 테스트값 갱신 → 커밋 메시지에 근거 기록. FSE 엔진 수식 변경은 사용자 승인 후 버전을 올려서만 한다(현재 FSE-v2, 다음은 FSE-v3).
 
 ## 1. 제품 요약
 - 아이폰·갤럭시에서 링크 또는 홈 화면 추가(PWA)로 쓰는 모바일 퍼스트 웹앱. Next.js App Router + TypeScript + Tailwind, output: "export" 정적 사이트, Vercel 배포.
@@ -13,7 +13,7 @@
   - 사진: ARW, DNG, RAF, CR3, NEF, JPG/JPEG, PNG, WEBP, HEIC
   - 영상: MP4, MOV, WEBM (4K 60fps 프리뷰, 오디오 싱크 유지 인코딩)
   - Log: S-Log3(S-Gamut3.Cine/S-Gamut3), S-Log2, Apple Log, Samsung Log, F-Log2/F-Log, C-Log3, V-Log, N-Log, D-Log M, HLG, Rec.709. 자동 감지 후 상단 배지 1탭 전환.
-- 필름 시뮬레이션 32종 (FUJIFILM 20 / RICOH GR 12). 모든 입력을 WS(작업 색공간)로 정규화한 뒤 FSE-v1 3D LUT(33³, 사면체 보간)를 적용한다. 추가로 "원본"(시뮬레이션 없음 = 기준 톤 T_ref만 적용) 옵션을 둔다.
+- 필름 시뮬레이션 32종 (FUJIFILM 20 / RICOH GR 12). 모든 입력을 WS(작업 색공간)로 정규화한 뒤 FSE-v2 3D LUT(33³, 사면체 보간)를 적용한다. 추가로 "원본"(시뮬레이션 없음 = 기준 톤 T_ref만 적용) 옵션을 둔다.
 - 셰이더 효과: HDF 이중 반경 광학 확산, 컬러 크롬 이펙트 / FX 블루, 클럼핑 그레인.
 - 라이트룸급 보정: 자동, 라이트 밸런스, 노출, 밝기, 대비, 하이라이트, 쉐도우, 흰색, 검정, 색온도, 틴트, 채도, 생동감, 톤 커브(프리셋 5 + 터치 그래프 + 5구간), 선명도, 명료도, 디헤이즈, 비네팅. 모든 슬라이더는 더블탭 시 0으로 초기화.
 - EXIF 전체 표시, 저장 시 원본 EXIF 100% 재삽입(Orientation 만 1). 저장 모드 2종 [원본 화질(100% 해상도, PNG 무손실 또는 JPEG q=1.0)] / [압축(해상도·화질 슬라이더 + 예상 용량)]. Web Share API 로 사진첩 저장.
@@ -102,5 +102,5 @@ S14 디더·출력
 - Step 4: 메인 편집 화면(/lab/renderer 승격), 저장 모달(원본/압축, 예상 용량), EXIF 재삽입 연결, Web Share, 비디오 내보내기, PWA(Service Worker 프리캐시)
 
 ## 11. 정직성 메모
-- 후지필름·리코의 내부 이미지 처리 알고리즘은 비공개다. FSE-v1 파라미터는 공개 특성 기반 기준값 v1 이며, 실기 SOOC 동일성은 docs/COLOR_SCIENCE.md §14 보정 프로토콜(실기 RAW+JPEG 쌍 측정)로 수렴시킨다.
+- 후지필름·리코의 내부 이미지 처리 알고리즘은 비공개다. FSE-v2 파라미터는 공개 특성 기반 기준값이며, 실기 SOOC 동일성은 docs/COLOR_SCIENCE.md §14 보정 프로토콜(실기 RAW+JPEG 쌍 측정)로 수렴시킨다.
 - Samsung Log 는 공식 백서 수식을 내장한다(COLOR_SCIENCE §16.1). DJI D-Log M 은 공개 수식이 없어 D-Log 곡선 + D-Gamut 근사를 내장하고 UI 에 "근사" 를 표시한다(§16.2). 사용자가 공식 변환 LUT 를 등록하면 LUT 가 우선한다. 상수 추정 금지.

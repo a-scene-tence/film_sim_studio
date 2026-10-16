@@ -11,7 +11,7 @@ import { isoFromSummary } from "@/lib/render/params";
 import { filmBadgeLabel } from "@/lib/export/frame";
 import { computeAutoLight } from "@/lib/studio/auto-light";
 import { autoProfile, badgeText, type InputChoice } from "@/lib/studio/input-profile";
-import { initialEditState, selectSim, type EditAction, type SimInfo, type TabId } from "@/lib/studio/state";
+import { initialEditState, mediaOpenState, type EditAction, type SimInfo, type TabId } from "@/lib/studio/state";
 import { AboutSheet } from "./AboutSheet";
 import { computeAutoColor, solveEyedropper } from "@/lib/studio/color-auto";
 import { HistoryTimelineSheet } from "./HistoryTimelineSheet";
@@ -65,6 +65,7 @@ export default function Studio() {
   const [exportOpen, setExportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [compare, setCompare] = useState(false);
+  const [picking, setPicking] = useState(false);
   const [outSpace, setOutSpace] = useState<OutputSpace>("srgb");
   const [p3Ok, setP3Ok] = useState(false);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
@@ -162,15 +163,16 @@ export default function Studio() {
         setLoading("영상 준비 중");
         await renderer.setVideoSource(a, f);
       } else renderer.setPhotoSource(a);
-      const photoIso = isoFromSummary(a.exif?.summary.iso);
       setAsset(a);
       setFile(f);
       setIsDemo(demo);
       appliedChoice.current = "auto";
       setThumbs({});
+      // 새 미디어 = 완전 초기화: 필름·모든 슬라이더·HDF·톤 커브(mediaOpenState), 원본 비교·WB 스포이트 끔,
+      // 히스토리는 "초기 상태" 1개만 남긴다. 줌/팬은 Preview 가 asset.id 변경 시 1× 로 되돌린다.
       setCompare(false);
-      const base = selectSim(initialEditState(), demo ? "fuji-classic-chrome" : state.simId, photoIso);
-      histDispatch({ type: "reset", snap: { edit: demo ? { ...base, hdf: true } : base, choice: "auto" } });
+      setPicking(false);
+      histDispatch({ type: "reset", snap: { edit: mediaOpenState(demo), choice: "auto" } });
       if (demo) toast("데모 사진입니다. 32종 필름 · HDF · 그레인 · 커브를 자유롭게 바꿔 보세요");
       else if (a.warnings.length > 0) toast(a.warnings[0]!);
       if (!hintShown.current) {
@@ -183,7 +185,7 @@ export default function Studio() {
     } finally {
       if (seq === loadSeq.current) setLoading(null);
     }
-  }, [renderer, state.simId, toast]);
+  }, [renderer, toast]);
 
   const openDemo = useCallback(async () => {
     setLoading("데모 사진 불러오는 중");
@@ -279,7 +281,6 @@ export default function Studio() {
   }, [renderer, asset, dispatch, toast]);
 
   // ── 컬러 자동 보정 / WB 스포이트 ────────────────────────────────────────
-  const [picking, setPicking] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const runAutoColor = useCallback(() => {
     if (!renderer || !asset) return;

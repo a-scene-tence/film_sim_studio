@@ -72,6 +72,7 @@ describe("스튜디오 절대 모드: 레시피 레이어를 더하지 않는다
     expect(e.adjust.clarity).toBe(5);
     expect(e.adjust.sharpen).toBe(0);
     expect(e.hdf).toBe(false);
-    expect(effectiveParams({ ...p, absolute: false }, false).adjust.clarity).toBe(75);
+    // FSE-v2: 레시피가 중립이므로 Step 3 모드에서도 사용자 값 그대로
+    expect(effectiveParams({ ...p, absolute: false }, false).adjust.clarity).toBe(5);
   });
 });

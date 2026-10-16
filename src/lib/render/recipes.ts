@@ -1,6 +1,7 @@
-// 섹션 9 원터치 마스터 레시피 — 실기 SOOC 공장 기본값 표. 이 파일이 유일 기준이다(COLOR_SCIENCE §15).
-// 톤과 색 성격은 FSE-v1 LUT 가 담당하고, 레시피는 LUT 밖의 ISP 단계만 정의한다.
-// manifest 의 shaderHints 는 이 표에 이미 포함되어 있으므로 렌더러는 shaderHints 를 읽지 않는다(이중 적용 금지).
+// 섹션 9 원터치 마스터 레시피 — 이 파일이 유일 기준이다(COLOR_SCIENCE §15).
+// FSE-v2: 필름의 톤·색 성격은 오직 3D LUT 가 담당한다. 필름을 고를 때 LUT 위에 선명도·명료도·하이라이트·쉐도우·비네팅·그레인을
+// 숨은 레이어로 덧입히면 이중 적용(떡보정)이 되므로, 모든 시뮬레이션의 레시피는 중립(0/끔)이다. 추가 보정은 사용자가 슬라이더로만 한다.
+// manifest 의 shaderHints 도 비어 있으며 렌더러는 shaderHints 를 읽지 않는다.
 
 export type RecipeGrain = { amount: number; size: number } | "acros-iso";
 export interface Recipe {
@@ -21,45 +22,43 @@ const r = (sharpen: number, clarity: number, highlights: number, shadows: number
   Object.freeze({ sharpen, clarity, highlights, shadows, vignette, grain, cce, fxb, hdf });
 
 const G0 = { amount: 0, size: 0 } as const;
-const FUJI_COLOR = r(35, 0, 0, 0, 0, G0, 0, 0, false);
-const FUJI_ACROS = r(45, 0, 0, 0, 0, "acros-iso", 0, 0, false);
-const FUJI_MONO = r(35, 0, 0, 0, 0, G0, 0, 0, false);
-const RICOH_STD = r(50, 0, 0, 0, 0, G0, 0, 0, false);
+/** 중립 레시피: 슬라이더를 건드리지 않는다 (FSE-v2, 이중 적용 금지) */
+const NEUTRAL = r(0, 0, 0, 0, 0, G0, 0, 0, false);
 
 export const RECIPES: Readonly<Record<string, Recipe>> = Object.freeze({
-  none: r(0, 0, 0, 0, 0, G0, 0, 0, false),
-  "fuji-provia": FUJI_COLOR,
-  "fuji-velvia": FUJI_COLOR,
-  "fuji-astia": FUJI_COLOR,
-  "fuji-classic-chrome": FUJI_COLOR,
-  "fuji-reala-ace": FUJI_COLOR,
-  "fuji-pro-neg-hi": FUJI_COLOR,
-  "fuji-pro-neg-std": FUJI_COLOR,
-  "fuji-classic-neg": FUJI_COLOR,
-  "fuji-nostalgic-neg": FUJI_COLOR,
-  "fuji-eterna": FUJI_COLOR,
-  "fuji-eterna-bleach-bypass": FUJI_COLOR,
-  "fuji-acros": FUJI_ACROS,
-  "fuji-acros-ye": FUJI_ACROS,
-  "fuji-acros-r": FUJI_ACROS,
-  "fuji-acros-g": FUJI_ACROS,
-  "fuji-monochrome": FUJI_MONO,
-  "fuji-monochrome-ye": FUJI_MONO,
-  "fuji-monochrome-r": FUJI_MONO,
-  "fuji-monochrome-g": FUJI_MONO,
-  "fuji-sepia": FUJI_MONO,
-  "ricoh-standard": RICOH_STD,
-  "ricoh-vivid": RICOH_STD,
-  "ricoh-positive-film": RICOH_STD,
-  "ricoh-negative-film": RICOH_STD,
-  "ricoh-bleach-bypass": RICOH_STD,
-  "ricoh-cross-process": RICOH_STD,
-  "ricoh-retro": r(50, 0, 0, 0, -25, G0, 0, 0, false),
-  "ricoh-hdr-tone": r(50, 70, -50, 40, 0, G0, 0, 0, false),
-  "ricoh-monotone": r(50, 0, 0, 0, 0, G0, 0, 0, false),
-  "ricoh-soft-monotone": r(40, 0, 0, 0, 0, G0, 0, 0, false),
-  "ricoh-hard-monotone": r(55, 0, 0, 0, 0, G0, 0, 0, false),
-  "ricoh-hi-contrast-bw": r(55, 0, 0, 0, -45, { amount: 55, size: 45 }, 0, 0, false),
+  none: NEUTRAL,
+  "fuji-provia": NEUTRAL,
+  "fuji-velvia": NEUTRAL,
+  "fuji-astia": NEUTRAL,
+  "fuji-classic-chrome": NEUTRAL,
+  "fuji-reala-ace": NEUTRAL,
+  "fuji-pro-neg-hi": NEUTRAL,
+  "fuji-pro-neg-std": NEUTRAL,
+  "fuji-classic-neg": NEUTRAL,
+  "fuji-nostalgic-neg": NEUTRAL,
+  "fuji-eterna": NEUTRAL,
+  "fuji-eterna-bleach-bypass": NEUTRAL,
+  "fuji-acros": NEUTRAL,
+  "fuji-acros-ye": NEUTRAL,
+  "fuji-acros-r": NEUTRAL,
+  "fuji-acros-g": NEUTRAL,
+  "fuji-monochrome": NEUTRAL,
+  "fuji-monochrome-ye": NEUTRAL,
+  "fuji-monochrome-r": NEUTRAL,
+  "fuji-monochrome-g": NEUTRAL,
+  "fuji-sepia": NEUTRAL,
+  "ricoh-standard": NEUTRAL,
+  "ricoh-vivid": NEUTRAL,
+  "ricoh-positive-film": NEUTRAL,
+  "ricoh-negative-film": NEUTRAL,
+  "ricoh-bleach-bypass": NEUTRAL,
+  "ricoh-retro": NEUTRAL,
+  "ricoh-cross-process": NEUTRAL,
+  "ricoh-hdr-tone": NEUTRAL,
+  "ricoh-monotone": NEUTRAL,
+  "ricoh-soft-monotone": NEUTRAL,
+  "ricoh-hard-monotone": NEUTRAL,
+  "ricoh-hi-contrast-bw": NEUTRAL,
 });
 
 /** "acros-iso" 규칙: ISO = EXIF 0x8827(없으면 200), amount = clamp(round(8·log2(ISO/160)), 0, 45), size = ISO ≥ 3200 ? 60 : 25 */

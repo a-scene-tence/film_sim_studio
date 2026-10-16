@@ -20,16 +20,21 @@ describe("섹션 15.2-4 원터치 마스터 레시피", () => {
     expect(acrosGrain(12800)).toEqual({ amount: 45, size: 60 });
     expect(acrosGrain(null)).toEqual({ amount: 3, size: 25 });
   });
-  it("실효값: 사용자 + 레시피 clamp, 흑백 cce·fxb 0", () => {
+  it("FSE-v2: 모든 레시피는 중립 (LUT 위 이중 적용 금지)", () => {
+    for (const [id, rc] of Object.entries(RECIPES)) {
+      expect([id, rc.sharpen, rc.clarity, rc.highlights, rc.shadows, rc.vignette, rc.grain, rc.cce, rc.fxb, rc.hdf]).toEqual([id, 0, 0, 0, 0, 0, { amount: 0, size: 0 }, 0, 0, false]);
+    }
+  });
+  it("실효값: 사용자 값 그대로 clamp, 흑백 cce·fxb 0", () => {
     const e = effectiveParams({ ...DEFAULT_PARAMS, sim: "ricoh-hdr-tone", adjust: { ...DEFAULT_PARAMS.adjust, highlights: -80, clarity: 10 }, cce: 2 }, false);
-    expect(e.adjust.highlights).toBe(-100);
-    expect(e.adjust.clarity).toBe(80);
-    expect(e.adjust.shadows).toBe(40);
-    expect(e.adjust.sharpen).toBe(50);
+    expect(e.adjust.highlights).toBe(-80);
+    expect(e.adjust.clarity).toBe(10);
+    expect(e.adjust.shadows).toBe(0);
+    expect(e.adjust.sharpen).toBe(0);
     expect(e.cce).toBe(2);
     const m = effectiveParams({ ...DEFAULT_PARAMS, sim: "ricoh-hi-contrast-bw", cce: 2, fxb: 1 }, true);
     expect([m.cce, m.fxb]).toEqual([0, 0]);
-    expect([m.adjust.grainAmount, m.adjust.grainSize, m.adjust.vignette]).toEqual([55, 45, -45]);
+    expect([m.adjust.grainAmount, m.adjust.grainSize, m.adjust.vignette]).toEqual([0, 0, 0]);
     const u = effectiveParams({ ...DEFAULT_PARAMS, sim: "ricoh-hi-contrast-bw", adjust: { ...DEFAULT_PARAMS.adjust, grainSize: 10 } }, true);
     expect(u.adjust.grainSize).toBe(10);
   });
