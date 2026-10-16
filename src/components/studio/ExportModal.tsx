@@ -62,9 +62,9 @@ export function ExportModal(p: ExportModalProps) {
   const getClient = () => (client.current ??= new ExportClient());
   useEffect(() => () => { client.current?.dispose(); client.current = null; }, []);
 
-  // 모달이 열릴 때마다 옵션 화면으로 (이전 결과 해제)
+  // 모달을 닫으면 결과 Blob 참조를 해제하고, 열릴 때마다 옵션 화면으로 돌아간다
   useEffect(() => {
-    if (!open) return;
+    if (!open) { queueMicrotask(() => setDone(null)); return; }
     queueMicrotask(() => { setPhase("options"); setDone(null); setError(null); setProgress(null); setVprog(null); setEst(null); });
     snapshot.current = null;
     job.current = { cancelled: false };
