@@ -80,6 +80,18 @@ export function initialEditState(): EditState {
   return st;
 }
 
+/** 데모 사진 전용 시작 상태 (필름 소개용) */
+export const DEMO_SIM_ID = "fuji-classic-chrome";
+
+/**
+ * 새 미디어를 열 때의 편집 상태. 사용자 파일(사진·RAW·동영상)은 이전 미디어의 필름·슬라이더·HDF·톤 커브를 하나도 이어받지 않고
+ * 완전한 초기 상태(필름 없음, 필름 강도 100%, 모든 보정 0, HDF 끔, 톤 커브 linear)에서 시작한다. 데모만 소개용 필름 + HDF 로 시작한다.
+ */
+export function mediaOpenState(demo: boolean): EditState {
+  const st = initialEditState();
+  return demo ? { ...st, simId: DEMO_SIM_ID, hdf: true } : st;
+}
+
 /** 값 정규화: 숫자가 아니거나 NaN 이면 기본값, 그 외 clamp(min,max) → step 반올림 → step 소수 자릿수로 toFixed */
 export function normalizeValue(key: SliderKey, v: unknown): number {
   const sp = SLIDER_BY_KEY[key];
@@ -95,7 +107,8 @@ export function normalizeValue(key: SliderKey, v: unknown): number {
 export type SimDefaults = Partial<Pick<EditState, "sharpness" | "clarity" | "highlights" | "shadows" | "vignette" | "grainAmount" | "grainSize" | "cce" | "ccb" | "hdf">>;
 
 /**
- * Step 3 마스터 레시피 표(recipes.ts)의 값이 0/false 가 아닌 항목이 연동 키다.
+ * Step 3 마스터 레시피 표(recipes.ts)의 값이 0/false 가 아닌 항목이 연동 키다. FSE-v2 에서는 표가 전부 중립이라 항상 {} 이다
+ * (필름 선택이 슬라이더를 건드리지 않음 — LUT 위 이중 적용 금지).
  * 대응: sharpen→sharpness, grain.amount→grainAmount, grain.size→grainSize, fxb→ccb, 그 밖의 키는 같은 이름.
  */
 export function simDefaults(simId: string | null, iso: number | null = null): SimDefaults {

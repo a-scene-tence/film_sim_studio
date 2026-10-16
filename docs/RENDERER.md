@@ -231,7 +231,7 @@ S14 디더·출력
 ## 9. 원터치 마스터 레시피 (src/lib/render/recipes.ts)
 ### 9.1 원칙
 - 실기 SOOC 의 공장 기본 설정을 표로 고정한다: 그레인 끔, 컬러 크롬 끔, FX 블루 끔, 하이라이트/섀도 톤 0, 샤프니스 0 의 JPEG 엔진 기본 선명화.
-- 톤과 색 성격은 FSE-v1 LUT 가 담당하고, 레시피는 LUT 밖의 ISP 단계만 정의한다.
+- 톤과 색 성격은 FSE-v2 LUT 가 전담한다. 레시피는 모든 시뮬레이션에서 중립(0/끔)이다(COLOR_SCIENCE §15, 이중 적용 금지).
 - 시뮬레이션을 고르는 순간 레시피가 숨은 레이어로 적용되고 사용자 슬라이더는 0 을 유지한다.
 - manifest 의 shaderHints 는 이 표에 이미 포함되어 있으므로 렌더러는 shaderHints 를 읽지 않는다(이중 적용 금지).
 ### 9.2 표 (필드 순서: sharpen, clarity, highlights, shadows, vignette, grain, cce, fxb, hdf)

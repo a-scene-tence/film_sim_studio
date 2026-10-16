@@ -1,6 +1,6 @@
 {
   "schema": "fse-lut-manifest/1",
-  "engine": "FSE-v1",
+  "engine": "FSE-v2",
   "size": 33,
   "shaper": {
     "id": "fsh-v1",
@@ -25,8 +25,8 @@
       "order": 0,
       "cube": "/luts/cube/fuji-provia.cube",
       "bin": "/luts/bin/fuji-provia.bin",
-      "sha256Cube": "9a360a41aafb3ef2e513a77436597c11bbe81d8cfde2e39dc0e3f0525f257e47",
-      "sha256Bin": "1abc722e5e4b7cd3640c323a987cd550c55d5034f34255787c6a58c3e16eb652",
+      "sha256Cube": "f45279a3961d26dd7009700ac8cddc21e7eaebeaad9fe64f3708592b032206d9",
+      "sha256Bin": "8790d0076ddb909aa32ed5c1a1bdb92c1e02d30c31f7d603272abbec8d0b1f27",
       "shaderHints": {}
     },
     {
@@ -38,8 +38,8 @@
       "order": 1,
       "cube": "/luts/cube/fuji-velvia.cube",
       "bin": "/luts/bin/fuji-velvia.bin",
-      "sha256Cube": "6813a5c0ec421c98bf87bac04ff6e1fade89cf28de0f2788d4d06322a666e9ad",
-      "sha256Bin": "baab0064ec0f250e296f356371af1bc1890adabdbb71cf1f47ec7705acfbea89",
+      "sha256Cube": "fa98f08aa884c4b4059b5cc25956ab2a42867b900a4a38ffeaa0d34136976aaa",
+      "sha256Bin": "408755dddfec8c5228f47572d7a088fb817577fde9e43dd90667223fe1ff6309",
       "shaderHints": {}
     },
     {
@@ -51,8 +51,8 @@
       "order": 2,
       "cube": "/luts/cube/fuji-astia.cube",
       "bin": "/luts/bin/fuji-astia.bin",
-      "sha256Cube": "27286aa1665bccb5cb61fcf1232236da721101eae567f0dd5b0693848fa2908b",
-      "sha256Bin": "82a73c1c40222f1401e3db156b1213909fde8c1dc1e4445f444aa6340f5f73c1",
+      "sha256Cube": "dfc54a15467ff50d45b56d08e56a98dea6f744683db052672eab6077976a9273",
+      "sha256Bin": "47cf03f98c0227a9055fa191997af31f238a1f9299ab4a3e9c61671fc10e6276",
       "shaderHints": {}
     },
     {
@@ -64,8 +64,8 @@
       "order": 3,
       "cube": "/luts/cube/fuji-classic-chrome.cube",
       "bin": "/luts/bin/fuji-classic-chrome.bin",
-      "sha256Cube": "f3fafe4a04c97db35a113973f8c6143d3e3dd7466630b9ba37a2e99448de7e85",
-      "sha256Bin": "f78b9c96dcf5b9ace0b6c5b3b74e063dd7ff6a031f696692512ba4e389a998dd",
+      "sha256Cube": "6f38cd1b71f41971c835915a4976d0a1a3a109ec14f3ee3acd7f18575c269b36",
+      "sha256Bin": "b98edd38241797e4c05e98513b76f28743b452af105b1b8ad18ad83ee08397af",
       "shaderHints": {}
     },
     {
@@ -77,8 +77,8 @@
       "order": 4,
       "cube": "/luts/cube/fuji-reala-ace.cube",
       "bin": "/luts/bin/fuji-reala-ace.bin",
-      "sha256Cube": "f3845132c06d2306451905aa0bce5433e6375e6065967c5a733d8a30d775640c",
-      "sha256Bin": "a8eae335d46144da6bcbb6c428005a18544427bcdd2e5d0fff283327d5cdbcb0",
+      "sha256Cube": "455f7da97698eb03858dda622625278a7bac328790136be39d7a74c087737423",
+      "sha256Bin": "e027077a834e68a3947dab98c175a914be5d456a55b7ebd7972cd561bed935aa",
       "shaderHints": {}
     },
     {
@@ -90,8 +90,8 @@
       "order": 5,
       "cube": "/luts/cube/fuji-pro-neg-hi.cube",
       "bin": "/luts/bin/fuji-pro-neg-hi.bin",
-      "sha256Cube": "fe8e5966e96f05c56b5b51459790e3797f12e12ff40224a0c0ef86dd07053f52",
-      "sha256Bin": "5e121f554cef954cd924455385b2f1b80925fe6aa27746be00a6527598b90ba0",
+      "sha256Cube": "a6804f5cef97035b2f76621f248c39d84c91fe62f380a13c865a55bd1c61061a",
+      "sha256Bin": "7ba603f54f61a3c171053cecf2f598a61490ce178bec435b80af056c060429ec",
       "shaderHints": {}
     },
     {
@@ -103,8 +103,8 @@
       "order": 6,
       "cube": "/luts/cube/fuji-pro-neg-std.cube",
       "bin": "/luts/bin/fuji-pro-neg-std.bin",
-      "sha256Cube": "22d7136a459d39a843ea031fd8ff76c2b6b778277c41a30a857e1cee9ea7fd65",
-      "sha256Bin": "b0d664e11ee06e167332390925ac1c80830746431f4e2dcb7b736e90e72e675a",
+      "sha256Cube": "0359288a55146b271eb03787fcb1021ef7992bbd057e272d90ed719e50bcf6c6",
+      "sha256Bin": "274795b9a0227c00b7d2cf4f6873dc096eca185fbad2118d1cdc93080171c04e",
       "shaderHints": {}
     },
     {
@@ -116,8 +116,8 @@
       "order": 7,
       "cube": "/luts/cube/fuji-classic-neg.cube",
       "bin": "/luts/bin/fuji-classic-neg.bin",
-      "sha256Cube": "e2bb1ca511e3ef349766c29f04afa5c0fd96b17dac1e33a30af38016db59e5d4",
-      "sha256Bin": "814da03b0ed09c0b86e674830fbb0134ee739b790c32d50ce2e101761015a088",
+      "sha256Cube": "40690cf49913d5b12064c7575d2fce16bfccd2e4c8ae7c701ee63787364ebf9e",
+      "sha256Bin": "22146d14d6212d52f703ab7179175ded21374bde63aaf49910b5cc664183fe35",
       "shaderHints": {}
     },
     {
@@ -129,8 +129,8 @@
       "order": 8,
       "cube": "/luts/cube/fuji-nostalgic-neg.cube",
       "bin": "/luts/bin/fuji-nostalgic-neg.bin",
-      "sha256Cube": "cca3a53bc74a67b04c384684810783a9890fa9c14f363f8943a84fc562fae769",
-      "sha256Bin": "63e84d549b88f15545989bec7639d35915bc20c9f732688bee15abf01c67e166",
+      "sha256Cube": "fdc5cc76522be1534a208faca1fab2d0556b16386a9d33b8337daa101f99ec3c",
+      "sha256Bin": "5685ea09d2e484469c7616d640212ba8f4de7fbd96c3fbe6bf656e3f3f7029ce",
       "shaderHints": {}
     },
     {
@@ -142,8 +142,8 @@
       "order": 9,
       "cube": "/luts/cube/fuji-eterna.cube",
       "bin": "/luts/bin/fuji-eterna.bin",
-      "sha256Cube": "61d9fc0e46dc6e4de5e0db953967cac6386dc9910b5b53906826ace5b734eb86",
-      "sha256Bin": "ca1f871e2e5b28744578b5fb2d6607696aed7659979c06cfdc52051d1633ae25",
+      "sha256Cube": "84c8c949a6fd0b3c95fc36fc1c9d5dd6f70c07effaeba9c807ba931d5472d0e4",
+      "sha256Bin": "717ef5d62a32c28d44027473da107184a462fe639769f037f23908c9de0f03b2",
       "shaderHints": {}
     },
     {
@@ -155,8 +155,8 @@
       "order": 10,
       "cube": "/luts/cube/fuji-eterna-bleach-bypass.cube",
       "bin": "/luts/bin/fuji-eterna-bleach-bypass.bin",
-      "sha256Cube": "d1c551acf8d603d3de478878b6f871723ae95d56f9e5aa65570a1f8216f1cbce",
-      "sha256Bin": "64ae03b7bf83434814bb99edb9daa6e7424febdd5fbcdd6a29d4564f624d64ab",
+      "sha256Cube": "cf1949e7699ff814f23cb5d04b71b414a754dd725c4a3b1fe14d52ccbc8bce4f",
+      "sha256Bin": "1be7482aba242b1a05ecef9daec9c4bc0adb76f1a2fc1decbd79c2737fb9a33f",
       "shaderHints": {}
     },
     {
@@ -168,8 +168,8 @@
       "order": 11,
       "cube": "/luts/cube/fuji-acros.cube",
       "bin": "/luts/bin/fuji-acros.bin",
-      "sha256Cube": "9e4e57542c1101cb4c83ed223f721f435ad38437451ee458e504fd6051148267",
-      "sha256Bin": "092b2658775fab6e40758f586e99be5d06de6b4557d89886dcb512c651c08083",
+      "sha256Cube": "74878ff30d0568b21a658eea8c9e7b66ee3c2c5c20751c2e50d7fc197c15ce3f",
+      "sha256Bin": "f36453c113e2cf0c11dd196b468238a4c41ff6df7c07a65ab61329f2fd750b89",
       "shaderHints": {}
     },
     {
@@ -181,8 +181,8 @@
       "order": 12,
       "cube": "/luts/cube/fuji-acros-ye.cube",
       "bin": "/luts/bin/fuji-acros-ye.bin",
-      "sha256Cube": "d60931a362745758277ef77aaa8fc191ba321c153ea8086921f4efdbd160598d",
-      "sha256Bin": "e91ddb4003647076b19ac803723a282014492c0d0491d0e4182114d1f9f7bc01",
+      "sha256Cube": "666ab95d42917e2b4ae55e35a472e7038e6d33ed5e70f3b01f1d192d195180d1",
+      "sha256Bin": "197016e0e0fbeb7a8694a0dc26844c66ceeb1867d699032b83781e778ef291bb",
       "shaderHints": {}
     },
     {
@@ -194,8 +194,8 @@
       "order": 13,
       "cube": "/luts/cube/fuji-acros-r.cube",
       "bin": "/luts/bin/fuji-acros-r.bin",
-      "sha256Cube": "c3149678a32bbfd2dadcffdcbe08cae2c9b623c0995bfbe076bda1d9673e1913",
-      "sha256Bin": "ed1f5c0833e0ec5a668a216c66e2d4746dd3798335b4b85eb13a3358787c856d",
+      "sha256Cube": "b1f3b75cd756fe74ea51dae3066748ca722c5964cfe3ba623008c0e78a971e37",
+      "sha256Bin": "56269c03b0901260968196a49f53767bf5bb8d7ff1445e44f4da1e1d7221ed8a",
       "shaderHints": {}
     },
     {
@@ -207,8 +207,8 @@
       "order": 14,
       "cube": "/luts/cube/fuji-acros-g.cube",
       "bin": "/luts/bin/fuji-acros-g.bin",
-      "sha256Cube": "1c2cedd6f9b322fcb77d60b69f9f21c76a27361cc89f3274711242f138d392f6",
-      "sha256Bin": "96eeda13002b7564fa29a02cc855de265c664efd55c6e8b9d0fc3ac25e003812",
+      "sha256Cube": "cbf3d57e57c251d32a6a1d6ac9f3ad9f147737bef81f66b9244c6bfa95fb4300",
+      "sha256Bin": "39d72d655729e40af82d9c31aa5c4cc70ef494daaa2a91a62c1daa3f18542a5e",
       "shaderHints": {}
     },
     {
@@ -220,7 +220,7 @@
       "order": 15,
       "cube": "/luts/cube/fuji-monochrome.cube",
       "bin": "/luts/bin/fuji-monochrome.bin",
-      "sha256Cube": "f5a22ba710271bcf42259a902d17cb1ffe92833bb311093840dc66a58aa510ac",
+      "sha256Cube": "03f8c949446838608f04d03c6db05d691253adaa613ee95b48e673b977b2520a",
       "sha256Bin": "efefa29450482ee402fcb54230279d04a78229ba2b2d3e748c0736f59ea1de27",
       "shaderHints": {}
     },
@@ -233,7 +233,7 @@
       "order": 16,
       "cube": "/luts/cube/fuji-monochrome-ye.cube",
       "bin": "/luts/bin/fuji-monochrome-ye.bin",
-      "sha256Cube": "d6dcee9366442600dbee2d113046ea3340be6b3de420d113b4d9cb2914e47ba0",
+      "sha256Cube": "f209cc1d96a4be71966fe17c4b1ede70b209d1daea21c870a84e70da61dd60aa",
       "sha256Bin": "cb2800ac5bfe4f96c183a90fea5123b65ae9b48204ba3f4be920fc132b8bbf43",
       "shaderHints": {}
     },
@@ -246,7 +246,7 @@
       "order": 17,
       "cube": "/luts/cube/fuji-monochrome-r.cube",
       "bin": "/luts/bin/fuji-monochrome-r.bin",
-      "sha256Cube": "a416b87717dd1c8421e39ac99cc7b4bb36fb8e4eaef2faf0722feae7138173af",
+      "sha256Cube": "2697755afe24d438c1bdbcdf34870850e51ed74de500c075876671c67efdeb25",
       "sha256Bin": "852a6aa614ccf49d00ed67fbecfcdccd63a2fa086eb718987782490152c88a06",
       "shaderHints": {}
     },
@@ -259,7 +259,7 @@
       "order": 18,
       "cube": "/luts/cube/fuji-monochrome-g.cube",
       "bin": "/luts/bin/fuji-monochrome-g.bin",
-      "sha256Cube": "5ea35b97a65ecdb9344dc944ab287d1b465b5f4cc5565bda1a150b86c2bcce78",
+      "sha256Cube": "bffbbf997085dca4be9565779476d500677c769a4abfe255e8e0e7aa22ce71a1",
       "sha256Bin": "9cae8e98231d48fe6cf8b1b68d031b3490b2eb7ce79aacb81430681df02f4f07",
       "shaderHints": {}
     },
@@ -272,8 +272,8 @@
       "order": 19,
       "cube": "/luts/cube/fuji-sepia.cube",
       "bin": "/luts/bin/fuji-sepia.bin",
-      "sha256Cube": "51b789cb6c1eb5936f0b516e5847e8d286321c34818e3f06409163caed461a5c",
-      "sha256Bin": "03526324c22e6322ad24ada213d732785a67fa951fa6e27ccdda0fcc100f2eb2",
+      "sha256Cube": "a5cb9c1a4565f7ff0ee7ad85176607824d8d15265e5de18767a07904e94c1424",
+      "sha256Bin": "91ac3f6ec2c859e9d2e3bcd71cc23edbb4cea25b76d09d59b2c25b4deee5de2d",
       "shaderHints": {}
     },
     {
@@ -285,8 +285,8 @@
       "order": 20,
       "cube": "/luts/cube/ricoh-standard.cube",
       "bin": "/luts/bin/ricoh-standard.bin",
-      "sha256Cube": "00acc6bb4849d6282d84dfbe4157a6cf5ff53287dfceb7e97aae371ebf64889e",
-      "sha256Bin": "78c6d8b8eb1cc280dfdead6a477c18b474a1103869d62591b137653f68b559d6",
+      "sha256Cube": "f435667ec6c4299ba2c717fd7a8ed9e978b09b8843f2dc4c4184934ab9775ec0",
+      "sha256Bin": "d5baadb1ab79df77199cf4205246f0b54f3bc54288e27ff15bb5d14448230667",
       "shaderHints": {}
     },
     {
@@ -298,8 +298,8 @@
       "order": 21,
       "cube": "/luts/cube/ricoh-vivid.cube",
       "bin": "/luts/bin/ricoh-vivid.bin",
-      "sha256Cube": "cbcad0dc25366291aaab692c04d714f1a66cd8d41b08cde315d99d2b2a0f08e3",
-      "sha256Bin": "ba09fc6dd55b22d008f3df9e80b02a816a0ff63541aa15b3e866b4d68a89b45a",
+      "sha256Cube": "7fe66b14259a24068063870c7754f8f5b29e445a4903327b1096d34db623355b",
+      "sha256Bin": "454f1eb4f8ce800dffe7b033915e162a8142aae6c420ba01ed774ccbf93bae6a",
       "shaderHints": {}
     },
     {
@@ -311,8 +311,8 @@
       "order": 22,
       "cube": "/luts/cube/ricoh-positive-film.cube",
       "bin": "/luts/bin/ricoh-positive-film.bin",
-      "sha256Cube": "b8ac125e4410351e251bf5e93f22d1fd2b71d7cfcdbbc8fbe181de56534320b5",
-      "sha256Bin": "f29b97fa59b4f6123fe971b65cafdb5d6aceac065a1b4ee384f3084542cdb6cf",
+      "sha256Cube": "b34592993bbd6eeecc87dda2e04cb561c8797833fcc11e452464290f8ce3b865",
+      "sha256Bin": "4c69e85e40bb58cbe0ba4274af4985348fc7f8286c79c59c934d8bf56c99c945",
       "shaderHints": {}
     },
     {
@@ -324,8 +324,8 @@
       "order": 23,
       "cube": "/luts/cube/ricoh-negative-film.cube",
       "bin": "/luts/bin/ricoh-negative-film.bin",
-      "sha256Cube": "426998a5c0276833ee3b87043a39df6b7d222639d3b607ed772043ba371046ab",
-      "sha256Bin": "e8d17f049fc5612225ab548472bbf10180d17f54be0aa8bd6b4b003db493ccd4",
+      "sha256Cube": "9727f57b5b9d795f0c0049f442b7646163837497378b6eef2fd2b3be8dd54225",
+      "sha256Bin": "0901738bb7ec717103a51ace539f9de586e7b5d2186b8916a934f3011cc89268",
       "shaderHints": {}
     },
     {
@@ -337,8 +337,8 @@
       "order": 24,
       "cube": "/luts/cube/ricoh-bleach-bypass.cube",
       "bin": "/luts/bin/ricoh-bleach-bypass.bin",
-      "sha256Cube": "4417834d46ed49f5de0826fbdcbc29ef0f28d794d84ff4b54346deea209619ce",
-      "sha256Bin": "ea92d12ffaff85534e3fd32711038f5badd06ff7964e7c1ad387eeacece5158b",
+      "sha256Cube": "f85b95f14e835e74d8bfb23114ec1a0f2ce9146238fa38928e5f346303f3ab6e",
+      "sha256Bin": "5b0c40d4633396c4940588162e1770adfabd371150ce27f04f3be30fae59ca61",
       "shaderHints": {}
     },
     {
@@ -350,11 +350,9 @@
       "order": 25,
       "cube": "/luts/cube/ricoh-retro.cube",
       "bin": "/luts/bin/ricoh-retro.bin",
-      "sha256Cube": "92439c565b37c60ba0fb2d961cbe70993a67b1ab817f9169799f7202e5560d35",
-      "sha256Bin": "fc81910b60c5387b87cd87d8c86e33a402c433c19c4364e94a651c6a9334af05",
-      "shaderHints": {
-        "vignette": -25
-      }
+      "sha256Cube": "1c33aaea98e562cb01ec62345404dcabe3e80549eca4d1e29388473ad1547898",
+      "sha256Bin": "132427f29460924256cb0d5c30da5f402207ef16b175e121e34880c77543f83b",
+      "shaderHints": {}
     },
     {
       "id": "ricoh-cross-process",
@@ -365,8 +363,8 @@
       "order": 26,
       "cube": "/luts/cube/ricoh-cross-process.cube",
       "bin": "/luts/bin/ricoh-cross-process.bin",
-      "sha256Cube": "d6b93c76ea1b9194cecb77f4a6a4f9f0a115dcb030df000e45663ddbee1322d5",
-      "sha256Bin": "2853dc51e2e9e337a8f51842eef22ce087d98fd9152520e4946138f0271b3709",
+      "sha256Cube": "ddcc986aed59952eb8ac588542cb78fe18bcc55ac2db0b17078682a6fd6f355d",
+      "sha256Bin": "8647acf61eb87d02cd124ff7775d4a219880c6fcce543ac7f9bc1cd049910bd5",
       "shaderHints": {}
     },
     {
@@ -378,13 +376,9 @@
       "order": 27,
       "cube": "/luts/cube/ricoh-hdr-tone.cube",
       "bin": "/luts/bin/ricoh-hdr-tone.bin",
-      "sha256Cube": "8a1a5c9b20079754f47c1a4dfaf352fde182a4a29f3cd36ff00c5867a01e6580",
-      "sha256Bin": "7dc6b5928de6a59be9c731c00806e37aa7d7369db930ad475ed7f3b8cc7d16e5",
-      "shaderHints": {
-        "clarity": 70,
-        "shadows": 40,
-        "highlights": -50
-      }
+      "sha256Cube": "5e138d5ca5fa498f319dbba9e89649a9ddcf0f98b1795ab6221acdafa20457f3",
+      "sha256Bin": "fa5f415083d6acb8500bc2c2004a1d8a695c37fe01c061ece2625e40504acac8",
+      "shaderHints": {}
     },
     {
       "id": "ricoh-monotone",
@@ -395,8 +389,8 @@
       "order": 28,
       "cube": "/luts/cube/ricoh-monotone.cube",
       "bin": "/luts/bin/ricoh-monotone.bin",
-      "sha256Cube": "7f05d9aa3917f6132ac526363c73f40be8527cc2206a517e6882ef640377f25f",
-      "sha256Bin": "555128543e5ced56132fffbe11bcb788e88bad58411482847192b2b819fff35b",
+      "sha256Cube": "d12088eab7180ea53039d83fab9a7ac213658eb1e810fa27905a27780bf3930d",
+      "sha256Bin": "7cba04d9f69cc596351321e28d45da55e59c1b2c5dab7e5c0d2331d1f48e51ea",
       "shaderHints": {}
     },
     {
@@ -408,8 +402,8 @@
       "order": 29,
       "cube": "/luts/cube/ricoh-soft-monotone.cube",
       "bin": "/luts/bin/ricoh-soft-monotone.bin",
-      "sha256Cube": "fe0bd9ebe9896e23a100a1eb0a2f268e45e54388b51e4bd517f5e2cf946de7a4",
-      "sha256Bin": "e589f41a2bf41b92493383227377c074e9dc2fca9e2f6e937d6eac1280217922",
+      "sha256Cube": "8c586a09c25abdb82eca4c8d8b201aa0873b563a5e4fea04159301ceb2345e3c",
+      "sha256Bin": "fbc24f2b69996d1272295a9114563b801b0ec0b355f672ff22f718cae9ffc25d",
       "shaderHints": {}
     },
     {
@@ -421,8 +415,8 @@
       "order": 30,
       "cube": "/luts/cube/ricoh-hard-monotone.cube",
       "bin": "/luts/bin/ricoh-hard-monotone.bin",
-      "sha256Cube": "175a2fa6a6e4bc6c740f68b6838d7fb3f659caf9ff799f0b2d8025110ed10432",
-      "sha256Bin": "d09caf6107baced9d586c0cb15a4851eb871d43427bbb9fdea3b059f4b91592a",
+      "sha256Cube": "c295c5f722bc46c485bfec644226631c9669c2ba56ef373e24333a65de2db7f6",
+      "sha256Bin": "2981c8b84b924a07c6503d53e2f7972c2c0944ae4146035d04ea8be65839a507",
       "shaderHints": {}
     },
     {
@@ -434,15 +428,9 @@
       "order": 31,
       "cube": "/luts/cube/ricoh-hi-contrast-bw.cube",
       "bin": "/luts/bin/ricoh-hi-contrast-bw.bin",
-      "sha256Cube": "d20b7bb37e5eea06cdd2bfe548c6b24a1a734974e61e13e56e638a203f3e497f",
-      "sha256Bin": "5e6f01f1710dc2cf5961086ab913581fd902dce64ada46e86d054a0c339ef115",
-      "shaderHints": {
-        "grain": {
-          "amount": 55,
-          "size": 45
-        },
-        "vignette": -45
-      }
+      "sha256Cube": "f87f27de7d855d8357b19a03707d722b9d76860e8be006fa0841bd9e3af690ba",
+      "sha256Bin": "92303ce4b07d1224a930d8415b3fca4ee38c69d4dd5a2e3e39902cac89cc8457",
+      "shaderHints": {}
     }
   ]
 }

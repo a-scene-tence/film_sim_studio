@@ -308,7 +308,7 @@ export default function LutLabPage() {
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-base font-semibold">내장 LUT (FSE-v1)</h2>
+        <h2 className="text-base font-semibold">내장 LUT (FSE-v2)</h2>
         <div className="flex gap-2" role="tablist">
           {(["fujifilm", "ricoh"] as const).map((b) => (
             <button

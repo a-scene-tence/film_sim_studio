@@ -72,17 +72,16 @@ describe("T8 SLIDERS 표 · normalizeValue · buildUniforms", () => {
 });
 
 describe("T9 selectSim / defaultFor (Step 4 §6-3)", () => {
-  it("골든 시퀀스", () => {
+  it("FSE-v2: 필름 선택은 상세 조정 슬라이더를 건드리지 않는다 (이중 적용 금지)", () => {
     let st: EditState = selectSim(initialEditState(), "fuji-provia");
+    expect({ ...st, simId: null }).toEqual(initialEditState());
     st = editReducer(st, { type: "set", key: "grainAmount", value: 30 });
-    st = selectSim(st, "ricoh-hi-contrast-bw");
-    expect([st.grainAmount, st.grainSize, st.vignette]).toEqual([55, 45, -45]);
-    st = selectSim(st, "ricoh-standard");
-    expect([st.grainAmount, st.grainSize, st.vignette]).toEqual([0, 0, 0]);
-    st = selectSim(st, "ricoh-hdr-tone");
-    expect([st.clarity, st.shadows, st.highlights]).toEqual([70, 40, -50]);
-    st = selectSim(st, "ricoh-retro");
-    expect([st.clarity, st.shadows, st.highlights, st.vignette]).toEqual([0, 0, 0, -25]);
+    st = editReducer(st, { type: "set", key: "sharpness", value: 12 });
+    for (const id of ["ricoh-hi-contrast-bw", "ricoh-standard", "ricoh-hdr-tone", "ricoh-retro", "fuji-acros", "fuji-velvia", null]) {
+      st = selectSim(st, id, 3200);
+      expect(st.simId).toBe(id);
+      expect([st.grainAmount, st.grainSize, st.sharpness, st.clarity, st.shadows, st.highlights, st.vignette, st.cce, st.ccb, st.hdf]).toEqual([30, 0, 12, 0, 0, 0, 0, 0, 0, false]);
+    }
   });
   it("필름 강도와 나머지 키는 그대로", () => {
     const st = { ...initialEditState(), filmStrength: 40, exposure: 1.5 };
@@ -90,13 +89,14 @@ describe("T9 selectSim / defaultFor (Step 4 §6-3)", () => {
     expect([n.filmStrength, n.exposure, n.simId]).toEqual([40, 1.5, "fuji-velvia"]);
     expect(selectSim(n, null).sharpness).toBe(0);
   });
-  it("defaultFor: 연동값이 있으면 그 값, 필름 강도·확산 강도는 100", () => {
-    expect(defaultFor("sharpness", "ricoh-hard-monotone")).toBe(55);
+  it("defaultFor: 모든 필름에서 §6-2 기본값 (필름 강도·확산 강도는 100)", () => {
+    expect(defaultFor("sharpness", "ricoh-hard-monotone")).toBe(0);
     expect(defaultFor("sharpness", null)).toBe(0);
     expect(defaultFor("filmStrength", "fuji-provia")).toBe(100);
     expect(defaultFor("hdfStrength", "ricoh-retro")).toBe(100);
     expect(defaultFor("zone2", "ricoh-retro")).toBe(0);
-    expect(defaultFor("grainAmount", "fuji-acros", 3200)).toBe(Math.min(45, Math.round(8 * Math.log2(3200 / 160))));
+    expect(defaultFor("grainAmount", "fuji-acros", 3200)).toBe(0);
+    expect(defaultFor("clarity", "ricoh-hdr-tone")).toBe(0);
   });
   it("커브: 프리셋 판별과 CurveState 왕복", () => {
     const c = editReducer(initialEditState(), { type: "curvePreset", preset: "matte" }).curve;

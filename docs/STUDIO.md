@@ -50,20 +50,20 @@ Step 3 톤 커브 프리셋 키는 지시서의 표기와 달라 실제 키를 �
 
 키는 29개(24 + zone 5). `hdf` 는 토글(기본 false), 곡선은 `curve { preset, points, zones }`. 부호는 U+2212.
 
-### 필름 연동 키 대응표 (`simDefaults(simId, iso)`)
-Step 3 마스터 레시피(render/recipes.ts)의 0 이 아닌 값이 연동 키다.
+### 필름 연동 키 (`simDefaults(simId, iso)`) — FSE-v2 에서 비어 있음
+FSE-v2 부터 Step 3 마스터 레시피(render/recipes.ts)는 모든 시뮬레이션에서 중립(0/끔)이라 연동 키가 없다(`simDefaults` = `{}`).
+필름을 고르면 상세 조정 슬라이더(선명도·명료도·하이라이트·쉐도우·비네팅·그레인·컬러 크롬·HDF)는 건드리지 않고 그대로 두며,
+톤·색 성격은 3D LUT 만으로 낸다(LUT 위 이중 적용 = 떡보정 금지, COLOR_SCIENCE §15). 슬라이더 더블탭은 `defaultFor(key, simId)` = §6 기본값으로 돌아간다.
+`selectSim(next)` 은 연동 키 ∪ 규칙을 유지하므로 레시피 표에 값을 다시 넣으면 그대로 연동된다.
 
-| 레시피 항목 | EditState 키 | 비고 |
-|---|---|---|
-| sharpen | sharpness | 후지 35/45(Acros), 리코 40~55 |
-| clarity / highlights / shadows / vignette | 같은 이름 | 예: 리코 HDR 톤 70/−50/40 |
-| grain.amount / grain.size | grainAmount / grainSize | `acros-iso` 는 EXIF ISO 로 `acrosGrain(iso)` |
-| cce / fxb | cce / ccb | 현재 표는 전부 0 |
-| hdf | hdf | 현재 표는 전부 false |
+### 새 미디어 열기 = 완전 초기화 (`mediaOpenState(demo)`, Studio.openFile)
+사용자 파일(사진·RAW·동영상)을 열면 이전 미디어의 편집 내역을 하나도 이어받지 않는다.
+- 편집 상태: `initialEditState()` — 필름 없음(원본, simId null), 필름 강도 100%, 모든 슬라이더 §6 기본값(0, 확산 강도 100%), HDF 끔, 톤 커브 linear·구간 0.
+- 뷰: 줌/팬 1×(Preview 가 asset.id 변경 시), 원본 비교 끔, WB 스포이트 끔, 입력 색공간 자동.
+- 히스토리: `reset` 으로 past/future/드래그 대기 상태를 비우고 타임라인은 "초기 상태" 1개만 남는다.
+- 데모 사진만 소개용으로 클래식 크롬 + HDF 로 시작한다(`DEMO_SIM_ID`).
 
-`selectSim(next)`: prev 연동 키 ∪ next 연동 키만 next 값(없으면 §6 기본값)으로 덮어쓰고 필름 강도·나머지는 그대로 둔다. 슬라이더 더블탭은 `defaultFor(key, simId)` 로 돌아간다.
-
-**절대 모드(`RenderParams.absolute = true`)**: Step 3 `effectiveParams` 는 레시피를 숨은 레이어로 사용자 값에 더한다. 스튜디오는 selectSim 이 연동 값을 슬라이더에 복사하므로 같은 값을 두 번 더하지 않도록 절대 모드에서는 레시피를 더하지 않는다. `absolute = false`(기본)는 Step 3 동작 그대로이고 /lab/renderer 가 쓴다.
+**절대 모드(`RenderParams.absolute = true`)**: Step 3 `effectiveParams` 는 레시피를 숨은 레이어로 사용자 값에 더한다(FSE-v2 에서는 레시피가 중립이라 더해지는 값이 0). 스튜디오는 절대 모드에서 레시피를 더하지 않는다. `absolute = false`(기본)는 Step 3 동작 그대로이고 /lab/renderer 가 쓴다.
 
 ## §7 레이아웃 치수
 - 루트: position fixed, inset 0, 100dvh, 좌우 padding env(safe-area-inset-*).
