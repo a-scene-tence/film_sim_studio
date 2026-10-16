@@ -191,6 +191,13 @@ export type LutStageRef =
 /** 원본 모드: srgbEnc(toneRef(x)) */
 export const originalEnc = (x: ArrayLike<number>): Vec3 => map3(x, (v) => srgbEnc(tone(v)));
 
+/** Step 4 §5-3: 필름 없음(T_ref) 과 필름 출력을 디스플레이 선형광에서 섞는다 (lutStage 의 JS 미러) */
+export function filmStrengthMix(vNone: ArrayLike<number>, vSim: ArrayLike<number>, k: number): Vec3 {
+  if (k >= 1) return [vSim[0]!, vSim[1]!, vSim[2]!];
+  const t = clamp01(k);
+  return [0, 1, 2].map((i) => srgbEnc(srgbDec(vNone[i]!) * (1 - t) + srgbDec(vSim[i]!) * t)) as Vec3;
+}
+
 export function lutStage(x: ArrayLike<number>, L: LutStageRef): Vec3 {
   if (L.mode === 0) return originalEnc(x);
   if (L.mode === 1) return tetraSample(L.data, L.size, map3(x, shaperEnc));
@@ -240,11 +247,18 @@ export function cceOp(v: ArrayLike<number>, ke: number, kb: number): Vec3 {
 export const applyCurve = (v: ArrayLike<number>, T: ArrayLike<number>): Vec3 => map3(v, (x) => sampleCurve(T, x));
 
 /** fs_post 의 채도·생동감·명료도 (명료도 ab = 가이드 필터 계수, null 이면 명료도 생략) */
-export function postChroma(v: ArrayLike<number>, sat: number, vib: number, clarity: number, clarAB: [number, number] | null): Vec3 {
+export function postChroma(v: ArrayLike<number>, sat: number, vib: number, clarity: number, clarAB: [number, number] | null, monoTint: [number, number] | null = null): Vec3 {
+  const tint = monoTint !== null && (monoTint[0] !== 0 || monoTint[1] !== 0);
   const chroma = sat !== 0 || vib !== 0;
   const clar = clarity !== 0 && clarAB !== null;
-  if (!chroma && !clar) return [v[0]!, v[1]!, v[2]!];
+  if (!tint && !chroma && !clar) return [v[0]!, v[1]!, v[2]!];
   let [L, a, b] = toLab(v);
+  if (tint) {
+    // Step 4 §5-4 흑백 조색: lab.yz += uMonoTint · sstep(0,0.25,L) · (1 − sstep(0.85,1,L))
+    const w = sstep(0, 0.25, L) * (1 - sstep(0.85, 1, L));
+    a += monoTint![0] * w;
+    b += monoTint![1] * w;
+  }
   if (chroma) {
     const C = Math.hypot(a, b);
     const h = Math.atan2(b, a) / DEG;
@@ -344,6 +358,9 @@ export interface PixelCtx {
   sat: number;
   vib: number;
   grain: { amount: number; scale: number; off: [number, number] } | null;
+  /** Step 4: 필름 강도 0..1 (기본 1), 흑백 조색 uMonoTint (mono 일 때만 적용) */
+  filmStrength?: number;
+  monoTint?: [number, number];
 }
 
 /** v = 소스 텍셀, (u, vv) = 전역 uv, (pxX, pxY) = 이미지 픽셀 중심 좌표 */
@@ -353,9 +370,10 @@ export function pixelPipeline(v: ArrayLike<number>, u: number, vv: number, pxX: 
   if (c.vig !== 0) { const f = vignetteF(u, vv, c.aspect, c.vig); x = map3(x, (q) => q * f); }
   x = clipNeg(x);
   let o = lutStage(x, c.lut);
+  if (c.lut.mode !== 0 && (c.filmStrength ?? 1) < 1) o = filmStrengthMix(originalEnc(x), o, c.filmStrength ?? 1);
   if (!c.mono && (c.ke > 0 || c.kb > 0)) o = cceOp(o, c.ke, c.kb);
   if (c.curve) o = applyCurve(o, c.curve);
-  o = postChroma(o, c.sat, c.vib, 0, null);
+  o = postChroma(o, c.sat, c.vib, 0, null, c.mono ? (c.monoTint ?? null) : null);
   if (c.grain && c.grain.amount > 0) o = grainApply(o, c.grain.amount, grainNoise(pxX, pxY, c.grain.scale, c.grain.off));
   return o;
 }

@@ -7,7 +7,7 @@ import { bakeCurve, curveOn, CURVE_N } from "./curve";
 import { DEFAULT_ATM, type Vec3 } from "./dehaze-atm";
 import { createLut3D, createTex2D, createContext, detectCaps, halfToFloat, renderErrors, renderWarnings, setUnpackState, type RendererCaps } from "./gl";
 import { PASS_NAMES } from "./glsl";
-import { RenderGraph, type ChainParams, type LutUniforms, type NormalizeUniforms } from "./graph";
+import { RenderGraph, type ChainParams, type HistPixels, type LutUniforms, type NormalizeUniforms } from "./graph";
 import { DOMAIN_INDEX, listStoreLuts, loadBuiltinLut, loadManifest, loadStoreLut, storeSourceProfile, type CpuLut, type LutManifest, type ManifestSim, type StoreLut } from "./luts";
 import { DEFAULT_PARAMS, effectiveParams, scalarUniforms, toneOpsOn, type Effective, type RenderParams } from "./params";
 import { grainOffset, grainScaleFull, grainScalePreview, hdfPlan, scaledSize, tilePadding, graphSizes, type Size } from "./plan";
@@ -81,13 +81,17 @@ export class FilmRenderer {
   private ready: Promise<void> = Promise.resolve();
   private lastR: Size | null = null;
   private disposed = false;
+  /** Step 4: 내보내기 전용 고정 렌더 크기 (설정되면 R = fixedR, <video> 없이 VideoFrame 을 직접 업로드) */
+  private fixedR: Size | null = null;
+  private frameViaBitmap = false;
+  private histWaiters: Array<(h: HistPixels | null) => void> = [];
 
-  static create(canvas: HTMLCanvasElement): FilmRenderer {
-    return new FilmRenderer(canvas);
+  static create(canvas: HTMLCanvasElement, opts: { preserveDrawingBuffer?: boolean } = {}): FilmRenderer {
+    return new FilmRenderer(canvas, opts);
   }
 
-  private constructor(private canvas: HTMLCanvasElement) {
-    this.gl = createContext(canvas);
+  private constructor(private canvas: HTMLCanvasElement, opts: { preserveDrawingBuffer?: boolean } = {}) {
+    this.gl = createContext(canvas, opts);
     this.caps = detectCaps(this.gl, this.warnings);
     this.graph = this.buildGraph();
     canvas.addEventListener("webglcontextlost", this.onLost);
@@ -217,11 +221,9 @@ export class FilmRenderer {
     return { width: a.displaySize.width, height: a.displaySize.height };
   }
 
-  private uploadVideoFrame(): boolean {
+  /** 섹션 10.3: 비디오 프레임 → srcTex. 처음 한 번 RGBA16F/HALF_FLOAT 업로드 가능 여부를 시험하고 안 되면 RGBA8 로 쓴다 */
+  private uploadSource(v: TexImageSource): void {
     const gl = this.gl;
-    const v = this.videoSrc?.video;
-    const a = this.asset;
-    if (!v || !a?.video || v.readyState < 2) return false;
     if (!this.srcTex) this.srcTex = createTex2D(gl, 1, 1, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, gl.LINEAR, null);
     gl.bindTexture(gl.TEXTURE_2D, this.srcTex);
     setUnpackState(gl);
@@ -235,12 +237,53 @@ export class FilmRenderer {
     } else {
       gl.texImage2D(gl.TEXTURE_2D, 0, this.videoFmt.internal, gl.RGBA, this.videoFmt.type, v);
     }
+  }
+
+  private uploadVideoFrame(): boolean {
+    const v = this.videoSrc?.video;
+    const a = this.asset;
+    if (!v || !a?.video || v.readyState < 2) return false;
+    this.uploadSource(v);
     const rot = a.video.rotation;
     const disp = displaySizeOf(rot);
     const texRot = this.textureRotated(v, rot.orientation);
     this.srcOrient = texRot ? 1 : rot.orientation;
     this.srcSize = texRot ? disp : { width: rot.codedWidth, height: rot.codedHeight };
     return true;
+  }
+
+  // ── 내보내기 전용 비디오 (Step 4 §11-3) ──────────────────────────────────
+  /** <video> 없이 디코드된 VideoFrame 을 직접 렌더한다. size = 출력 (W2,H2) */
+  async setExportVideo(asset: MediaAsset, size: Size): Promise<void> {
+    this.releaseSource();
+    this.asset = asset;
+    this.fixedR = { width: size.width, height: size.height };
+    await this.refreshSourceLutAsync();
+  }
+
+  /**
+   * frame 은 회전이 적용되지 않은 코딩 방향 프레임이다. orient = 잔여 orientation 1..8 전체.
+   * texImage2D 가 VideoFrame 을 받지 못해 TypeError 를 던지면 그 뒤로는 createImageBitmap 으로 업로드한다.
+   */
+  async renderExportFrame(frame: VideoFrame, orient: number, grainSeed: number): Promise<void> {
+    if (!this.asset || !this.fixedR) throw renderErrors.noSource();
+    if (this.lost) throw renderErrors.lost();
+    if (!this.frameViaBitmap) {
+      try {
+        this.uploadSource(frame);
+      } catch (e) {
+        if (!(e instanceof TypeError)) throw e;
+        this.frameViaBitmap = true;
+      }
+    }
+    if (this.frameViaBitmap) {
+      const bitmap = await createImageBitmap(frame);
+      try { this.uploadSource(bitmap); } finally { bitmap.close(); }
+    }
+    this.srcOrient = orient;
+    this.srcSize = { width: frame.displayWidth || frame.codedWidth, height: frame.displayHeight || frame.codedHeight };
+    this.frameIndex = grainSeed;
+    this.renderNow();
   }
 
   /**
@@ -441,6 +484,7 @@ export class FilmRenderer {
 
   /** 렌더 크기 R: 사진 = 프록시, 비디오 = 섹션 10.5 */
   private renderSize(): Size {
+    if (this.fixedR) return this.fixedR;
     const a = this.asset!;
     if (a.kind !== "video") return { width: a.proxy.width, height: a.proxy.height };
     const disp = this.displaySize()!;
@@ -509,6 +553,36 @@ export class FilmRenderer {
 
   // ── 렌더 ─────────────────────────────────────────────────────────────────
   renderNow(): RenderStats {
+    const waiters = this.histWaiters;
+    this.histWaiters = [];
+    try {
+      const r = this.renderNowInner(waiters.length > 0);
+      for (const w of waiters) w(r.hist);
+      return r.stats;
+    } catch (e) {
+      for (const w of waiters) w(null);
+      throw e;
+    }
+  }
+
+  /** Step 4 §8-4: 다음 렌더에 히스토그램용 픽셀(긴 변 256 RGBA8)을 함께 읽어 돌려준다. 렌더를 예약한다 */
+  requestHistogram(): Promise<HistPixels | null> {
+    return new Promise((res) => {
+      this.histWaiters.push(res);
+      this.scheduleRender();
+    });
+  }
+
+  /** Step 4 §9-1: S0(uExpGain=1) 긴 변 256 의 휘도 배열. 비디오는 현재 표시 프레임 */
+  readAnalysisLuma(): Float32Array {
+    if (!this.asset || !this.srcTex || !this.srcSize) throw renderErrors.noSource();
+    if (this.asset.kind === "video") this.uploadVideoFrame();
+    const R = this.renderSize();
+    const c = this.chainParams(R);
+    return this.graph.analysisLuma(c, c.src.tex, c.src.size, c.src.orient);
+  }
+
+  private renderNowInner(wantHist: boolean): { stats: RenderStats; hist: HistPixels | null } {
     const t0 = performance.now();
     if (!this.asset || !this.srcTex || !this.srcSize) throw renderErrors.noSource();
     if (this.lost) throw renderErrors.lost();
@@ -522,14 +596,14 @@ export class FilmRenderer {
     if (this.canvas.height !== R.height) this.canvas.height = R.height;
     const c = this.chainParams(R);
     const atmReq = this.atmRequest(R, c.s.uDehaze);
-    const r = this.graph.renderPreview(c, { kind: "canvas" }, atmReq, (A) => { this.atm = A; });
+    const r = this.graph.renderPreview(c, { kind: "canvas", hist: wantHist }, atmReq, (A) => { this.atm = A; });
     this.atm = r.atm;
     if (r.dzA) this.startAtmRead(r.dzA);
     this.lastChainSig = this.chainSig(R);
     this.chainVersion++;
     const stats = { passes: r.passes, cpuMs: performance.now() - t0, R };
     this.onStatus?.();
-    return stats;
+    return { stats, hist: r.hist };
   }
 
   private atmRequest(R: Size, dehaze: number): { value: Vec3; refresh: "none" | "sync" | "async" } {
@@ -639,7 +713,7 @@ export class FilmRenderer {
         norm: this.normalizeUniforms(this.asset.descriptor).ctx,
         ct: s.uCt, vig: s.uVig, aspect: R.width / R.height, lut, mono: e.mono, ke: s.uKe, kb: s.uKb,
         curve: curveOn(this.params.curve) ? this.curveTable : null,
-        sat: s.uSat, vib: s.uVib,
+        sat: s.uSat, vib: s.uVib, filmStrength: s.uFilmStrength, monoTint: s.uMonoTint,
         grain: s.uGrainAmt > 0 ? { amount: s.uGrainAmt, scale: grainScalePreview(this.outLong(), Math.max(R.width, R.height), e.adjust.grainSize), off: grainOffset(0) } : null,
       };
       return { ctx, R };

@@ -1,6 +1,7 @@
 // 섹션 4.2-8 셰이더 조립: header + common + lib_ops + 각 패스 본문 순서로 연결한다.
 import { COMMON_GLSL } from "./common";
 import { FS_FINAL_GLSL } from "./fs_final";
+import { FS_HIST_GLSL } from "./fs_hist";
 import { FS_MAIN_GLSL } from "./fs_main";
 import { FS_NORMALIZE_GLSL } from "./fs_normalize";
 import { FS_POST_GLSL } from "./fs_post";
@@ -16,9 +17,9 @@ export { COMMON_GLSL, HEADER_GLSL, LIB_OPS_GLSL, VS_GLSL };
 
 export type PassName =
   | "normalize" | "hdf_extract" | "down2" | "gauss" | "box" | "gf_ab" | "min7" | "prep"
-  | "dz_tt" | "dz_q" | "main" | "post" | "blurL" | "final" | "probe";
+  | "dz_tt" | "dz_q" | "main" | "post" | "blurL" | "final" | "probe" | "hist";
 
-/** 15개 프래그먼트 패스 본문 */
+/** 16개 프래그먼트 패스 본문 (Step 4 에서 hist 추가) */
 export const PASS_BODIES: Readonly<Record<PassName, string>> = Object.freeze({
   normalize: FS_NORMALIZE_GLSL,
   hdf_extract: FS_HDF_EXTRACT_GLSL,
@@ -35,6 +36,7 @@ export const PASS_BODIES: Readonly<Record<PassName, string>> = Object.freeze({
   blurL: FS_BLURL_GLSL,
   final: FS_FINAL_GLSL,
   probe: FS_PROBE_GLSL,
+  hist: FS_HIST_GLSL,
 });
 
 export const PASS_NAMES = Object.keys(PASS_BODIES) as PassName[];

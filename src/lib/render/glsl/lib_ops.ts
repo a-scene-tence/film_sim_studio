@@ -1,4 +1,4 @@
-// docs/RENDERER.md 섹션 6 lib_ops.glsl — 글자 그대로 옮긴 정본. 수정 금지.
+// docs/RENDERER.md 섹션 6 lib_ops.glsl — 정본. Step 4 §5-2 패치(uHdfK)만 허용.
 export const LIB_OPS_GLSL = `// ===== lib_ops.glsl : shared per-pixel operators =====
 uniform vec2 uDstSize;     // render target size (px)
 uniform vec2 uTileOrigin;  // display-px origin of this target inside the full image (preview: 0,0)
@@ -7,12 +7,13 @@ vec2 uvLocal() { return gl_FragCoord.xy / uDstSize; }
 vec2 uvGlobal() { return (uTileOrigin + gl_FragCoord.xy) / uImageSize; }
 vec3 emitHdf(vec3 x) { vec3 c = max(x, 0.0); float Y = dot(LUMA, c); return c * sstep(0.60, 2.00, Y); }
 uniform bool uHdf;
+uniform float uHdfK;       // diffusion strength 0..2 (UI 0..200 %, default 1)
 uniform sampler2D uCore;   // core glow, sampled with local uv
 uniform sampler2D uHalo;   // wide veil, sampled with global uv
 vec3 hdfComposite(vec3 x, vec2 uvL, vec2 uvG) {
   if (!uHdf) return x;
   vec3 s = emitHdf(x);
-  return x - 0.48 * s + 0.30 * texture(uCore, uvL).rgb + 0.18 * texture(uHalo, uvG).rgb;
+  return x + uHdfK * (-0.48 * s + 0.30 * texture(uCore, uvL).rgb + 0.18 * texture(uHalo, uvG).rgb);
 }
 uniform float uDehaze;     // -100..100
 uniform vec3 uAtm;         // atmospheric light A
