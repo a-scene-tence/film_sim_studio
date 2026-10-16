@@ -18,6 +18,8 @@ export const IconLight = (p: IconProps) => <Svg {...p}><circle cx="12" cy="12" r
 export const IconColor = (p: IconProps) => <Svg {...p}><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.7-1.6 1.6-1.6H17a4 4 0 0 0 4-4C21 6.7 17 3 12 3z" /><circle cx="7.5" cy="11" r="1" /><circle cx="10" cy="7" r="1" /><circle cx="15" cy="7.5" r="1" /></Svg>;
 export const IconCurve = (p: IconProps) => <Svg {...p}><path d="M4 20V4M4 20h16" /><path d="M6 18c4 0 5-2 7-6s4-6 7-6" /></Svg>;
 export const IconDetail = (p: IconProps) => <Svg {...p}><path d="M4 7h10M18 7h2M4 17h2M10 17h10" /><circle cx="16" cy="7" r="2" /><circle cx="8" cy="17" r="2" /></Svg>;
+export const IconUndo = (p: IconProps) => <Svg {...p}><path d="M9 14L4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 0 12h-3" /></Svg>;
+export const IconRedo = (p: IconProps) => <Svg {...p}><path d="M15 14l5-5-5-5" /><path d="M20 9H10a6 6 0 0 0 0 12h3" /></Svg>;
 export const IconPlay = (p: IconProps) => <Svg {...p}><path d="M7 4.5v15l12-7.5z" fill="currentColor" /></Svg>;
 export const IconPause = (p: IconProps) => <Svg {...p}><path d="M8 5v14M16 5v14" /></Svg>;
 export const IconVolume = (p: IconProps) => <Svg {...p}><path d="M4 9v6h4l5 4V5L8 9z" /><path d="M16.5 8.5a5 5 0 0 1 0 7" /></Svg>;

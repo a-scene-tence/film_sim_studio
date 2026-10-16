@@ -11,7 +11,8 @@ import { isoFromSummary } from "@/lib/render/params";
 import { filmBadgeLabel } from "@/lib/export/frame";
 import { computeAutoLight } from "@/lib/studio/auto-light";
 import { autoProfile, badgeText, type InputChoice } from "@/lib/studio/input-profile";
-import { editReducer, getValue, initialEditState, selectSim, type ParamKey, type SimInfo, type TabId } from "@/lib/studio/state";
+import { initialEditState, selectSim, type EditAction, type SimInfo, type TabId } from "@/lib/studio/state";
+import { historyReducer, initialHistory, redoLabel, undoLabel } from "@/lib/studio/history";
 import { startThumbnails } from "@/lib/studio/thumbs";
 import { buildRenderParams } from "@/lib/studio/uniforms";
 import { simRecipe } from "@/lib/studio/state";
@@ -33,7 +34,6 @@ import { LightTab } from "./tabs/LightTab";
 import { ToastView, useToastQueue } from "./Toast";
 
 const DEMO_URL = "/demo/demo-scene.jpg";
-const LIGHT_KEYS: ParamKey[] = ["lightBalance", "exposure", "brightness", "contrast", "highlights", "shadows", "whites", "blacks"];
 
 /** 로더 단계 문구 끝의 말줄임표를 없앤다 */
 const stripEllipsis = (s: string) => s.replace(/(…|\.{2,})\s*$/u, "");
@@ -43,14 +43,20 @@ export default function Studio() {
   const [renderer, setRenderer] = useState<FilmRenderer | null>(null);
   const [fatal, setFatal] = useState<string | null>(null);
   const [ctxLost, setCtxLost] = useState(false);
-  const [state, dispatch] = useReducer(editReducer, undefined, initialEditState);
+  const [hist, histDispatch] = useReducer(historyReducer, undefined, () => initialHistory({ edit: initialEditState(), choice: "auto" }));
+  const state = hist.present.edit;
+  const choice = hist.present.choice as InputChoice;
+  const appliedChoice = useRef<InputChoice>("auto");
+  const dispatch = useCallback((action: EditAction) => histDispatch({ type: "do", action }), []);
+  const live = useCallback((action: EditAction) => histDispatch({ type: "live", action }), []);
+  const beginEdit = useCallback(() => histDispatch({ type: "begin" }), []);
+  const commitEdit = useCallback(() => histDispatch({ type: "commit" }), []);
   const [sims, setSims] = useState<SimInfo[]>([]);
   const [asset, setAsset] = useState<MediaAsset | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [isDemo, setIsDemo] = useState(false);
   const [loading, setLoading] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>("film");
-  const [choice, setChoice] = useState<InputChoice>("auto");
   const [profileOpen, setProfileOpen] = useState(false);
   const [exifOpen, setExifOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -157,11 +163,11 @@ export default function Studio() {
       setAsset(a);
       setFile(f);
       setIsDemo(demo);
-      setChoice("auto");
+      appliedChoice.current = "auto";
       setThumbs({});
       setCompare(false);
       const base = selectSim(initialEditState(), demo ? "fuji-classic-chrome" : state.simId, photoIso);
-      dispatch({ type: "replace", state: demo ? { ...base, hdf: true } : base });
+      histDispatch({ type: "reset", snap: { edit: demo ? { ...base, hdf: true } : base, choice: "auto" } });
       if (demo) toast("데모 사진입니다. 32종 필름 · HDF · 그레인 · 커브를 자유롭게 바꿔 보세요");
       else if (a.warnings.length > 0) toast(a.warnings[0]!);
       if (!hintShown.current) {
@@ -226,8 +232,8 @@ export default function Studio() {
   }, []);
 
   // ── 입력 색공간 ──────────────────────────────────────────────────────────
-  const selectProfile = useCallback(async (c: InputChoice) => {
-    if (!asset || !renderer) return;
+  const applyProfile = useCallback(async (c: InputChoice): Promise<boolean> => {
+    if (!asset || !renderer) return false;
     try {
       const det = asset.detection;
       const prof: SourceProfileId = c === "auto" ? autoProfile(det, asset.kind !== "video") : c;
@@ -235,31 +241,73 @@ export default function Studio() {
       const next = await setSourceProfile(asset.id, prof, prim);
       renderer.updateAsset(next);
       setAsset(next);
-      setChoice(c);
-      setProfileOpen(false);
+      appliedChoice.current = c;
+      return true;
     } catch (e) {
       toast(e instanceof Error ? e.message : String(e));
+      return false;
     }
   }, [asset, renderer, toast]);
+
+  /** 사용자가 입력 색공간을 고름: 적용에 성공하면 히스토리 1단계로 기록 */
+  const selectProfile = useCallback(async (c: InputChoice) => {
+    if (await applyProfile(c)) {
+      histDispatch({ type: "do", action: { type: "choice", choice: c } });
+      setProfileOpen(false);
+    }
+  }, [applyProfile]);
+
+  // Undo/Redo 로 입력 색공간 선택이 바뀌면 실제 소스 프로파일도 맞춘다 (히스토리에는 다시 쌓지 않는다)
+  useEffect(() => {
+    if (!asset || !renderer || choice === appliedChoice.current) return;
+    void applyProfile(choice);
+  }, [choice, asset, renderer, applyProfile]);
 
   // ── 자동 보정 ────────────────────────────────────────────────────────────
   const runAuto = useCallback(() => {
     if (!renderer || !asset) return;
     try {
-      const prev = Object.fromEntries(LIGHT_KEYS.map((k) => [k, getValue(state, k)])) as Partial<Record<ParamKey, number>>;
       const r = computeAutoLight(renderer.readAnalysisLuma());
       dispatch({ type: "patch", values: { exposure: r.exposure, contrast: r.contrast, highlights: r.highlights, shadows: r.shadows, whites: r.whites, blacks: r.blacks, brightness: 0, lightBalance: 0 } });
-      toast("자동 보정 적용", { duration: 5000, actions: [{ label: "되돌리기", onClick: () => dispatch({ type: "patch", values: prev }) }] });
+      toast("자동 보정 적용", { duration: 5000, actions: [{ label: "되돌리기", onClick: () => histDispatch({ type: "undo" }) }] });
     } catch (e) {
       toast(e instanceof Error ? e.message : String(e));
     }
-  }, [renderer, asset, state, toast]);
+  }, [renderer, asset, dispatch, toast]);
+
+  // ── 되돌리기 / 다시 실행 ─────────────────────────────────────────────────
+  const undoText = undoLabel(hist);
+  const redoText = redoLabel(hist);
+  const historyLocked = loading !== null || exporting || exportOpen;
+  const undo = useCallback(() => {
+    if (!undoText || historyLocked) return;
+    histDispatch({ type: "undo" });
+    toast(`되돌리기: ${undoText}`, { duration: 1800 });
+  }, [undoText, historyLocked, toast]);
+  const redo = useCallback(() => {
+    if (!redoText || historyLocked) return;
+    histDispatch({ type: "redo" });
+    toast(`다시 실행: ${redoText}`, { duration: 1800 });
+  }, [redoText, historyLocked, toast]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || t.tagName === "INPUT" && (t as HTMLInputElement).type !== "range" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")) return; // 입력창 고유의 실행 취소 유지
+      const k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+      else if ((k === "z" && e.shiftKey) || (k === "y" && !e.shiftKey)) { e.preventDefault(); redo(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo]);
 
   const editKey = useMemo(() => JSON.stringify([state, compare, asset?.descriptor ?? null]), [state, compare, asset]);
 
   const ctx: StudioCtx = useMemo(
-    () => ({ state, dispatch, sims, iso, asset, file, renderer, toast, mono, thumbs, hasMedia: asset !== null }),
-    [state, sims, iso, asset, file, renderer, toast, mono, thumbs],
+    () => ({ state, dispatch, live, beginEdit, commitEdit, sims, iso, asset, file, renderer, toast, mono, thumbs, hasMedia: asset !== null }),
+    [state, dispatch, live, beginEdit, commitEdit, sims, iso, asset, file, renderer, toast, mono, thumbs],
   );
 
   const binding = renderer?.inputBinding() ?? null;
@@ -282,6 +330,7 @@ export default function Studio() {
           onBadge={() => setProfileOpen(true)} demo={isDemo} onExif={() => setExifOpen(true)} onSave={() => { setPauseSignal((n) => n + 1); setExportOpen(true); }}
           hasMedia={asset !== null} busy={loading !== null || exporting}
           p3Available={p3Ok} outSpace={outSpace} onOutSpace={changeOutSpace}
+          undoLabel={undoText} redoLabel={redoText} undoDepth={hist.past.length} onUndo={undo} onRedo={redo}
         />
         <div className="studio-body">
           <Preview

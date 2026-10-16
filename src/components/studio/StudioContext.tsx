@@ -8,7 +8,14 @@ import type { ToastFn } from "./Toast";
 
 export interface StudioCtx {
   state: EditState;
+  /** 단발성 조작: 즉시 히스토리 1단계로 기록 */
   dispatch: Dispatch<EditAction>;
+  /** 드래그 중 실시간 갱신 (히스토리에 쌓지 않는다) */
+  live: Dispatch<EditAction>;
+  /** 드래그 시작: 기준 상태 기억 */
+  beginEdit(): void;
+  /** 드래그 확정: 값이 달라졌다면 1단계로 기록 */
+  commitEdit(): void;
   sims: ReadonlyArray<SimInfo>;
   /** EXIF ISO (acros 그레인 규칙) */
   iso: number | null;

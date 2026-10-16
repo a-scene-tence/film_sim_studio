@@ -1,7 +1,7 @@
 "use client";
 import { useRef } from "react";
 import type { OutputSpace } from "@/lib/render/output-space";
-import { IconInfo, IconOpen } from "./icons";
+import { IconInfo, IconOpen, IconRedo, IconUndo } from "./icons";
 
 export const ACCEPT_FALLBACK = "image/*,video/*,.dng,.arw,.cr2,.cr3,.nef,.raf,.orf,.rw2,.pef,.srw,.heic,.heif,.mov,.mp4,.webm";
 
@@ -21,6 +21,13 @@ export interface HeaderProps {
   p3Available?: boolean;
   outSpace?: OutputSpace;
   onOutSpace?(s: OutputSpace): void;
+  /** 히스토리: 되돌릴/다시 실행할 항목 라벨(없으면 null → 비활성) */
+  undoLabel?: string | null;
+  redoLabel?: string | null;
+  /** 되돌릴 수 있는 단계 수 (뱃지) */
+  undoDepth?: number;
+  onUndo?(): void;
+  onRedo?(): void;
 }
 
 /** Step 4 §7-3 ① 헤더: 높이 52px + safe-area 위쪽, 좌우 12px */
@@ -52,6 +59,21 @@ export function Header(p: HeaderProps) {
         </button>
       ) : null}
       <div className="flex-1" />
+      <button
+        type="button" aria-label={p.undoLabel ? `되돌리기: ${p.undoLabel}` : "되돌리기"} title="되돌리기 (Ctrl/⌘+Z)" disabled={!p.undoLabel || p.busy}
+        className="relative flex h-11 w-11 shrink-0 items-center justify-center text-[var(--accent)] transition-opacity disabled:text-[var(--text)] disabled:opacity-30" onClick={p.onUndo}
+      >
+        <IconUndo />
+        {p.undoLabel && (p.undoDepth ?? 0) > 0 ? (
+          <span className="absolute right-0.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-bold leading-none text-[#0b0b0c]">{p.undoDepth}</span>
+        ) : null}
+      </button>
+      <button
+        type="button" aria-label={p.redoLabel ? `다시 실행: ${p.redoLabel}` : "다시 실행"} title="다시 실행 (Ctrl/⌘+Shift+Z)" disabled={!p.redoLabel || p.busy}
+        className="flex h-11 w-11 shrink-0 items-center justify-center text-[var(--accent)] transition-opacity disabled:text-[var(--text)] disabled:opacity-30" onClick={p.onRedo}
+      >
+        <IconRedo />
+      </button>
       <button type="button" aria-label="EXIF 정보" disabled={!p.hasMedia} className="flex h-11 w-11 items-center justify-center text-[var(--text)] disabled:opacity-40" onClick={p.onExif}><IconInfo /></button>
       <button type="button" disabled={!p.hasMedia || p.busy} className="flex h-11 shrink-0 items-center disabled:opacity-40" onClick={p.onSave}>
         <span className="flex h-9 items-center whitespace-nowrap rounded-[18px] bg-[var(--accent)] px-4 text-[14px] font-semibold text-[#0b0b0c]">저장하기</span>
