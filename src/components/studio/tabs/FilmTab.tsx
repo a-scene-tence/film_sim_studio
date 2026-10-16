@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { RecipeList } from "../RecipeList";
+import { DisclaimerFootnote } from "../AboutSheet";
 import { useStudio } from "../StudioContext";
 import { StateSlider } from "./common";
 
@@ -27,7 +28,7 @@ function Card({ id, name, selected, thumb, onPick }: { id: string | null; name: 
 }
 
 export function FilmTab() {
-  const { state, dispatch, sims, thumbs, iso, hasMedia } = useStudio();
+  const { state, dispatch, sims, thumbs, iso, hasMedia, openAbout } = useStudio();
   const [seg, setSeg] = useState<Seg>("fujifilm");
   const fuji = sims.filter((s) => s.brand === "fujifilm");
   const ricoh = sims.filter((s) => s.brand === "ricoh");
@@ -49,6 +50,7 @@ export function FilmTab() {
             {list.map((s) => <Card key={s.id} id={s.id} name={s.ko} selected={state.simId === s.id} thumb={thumbs[s.id]} onPick={() => pick(s.id)} />)}
           </div>
           <StateSlider k="filmStrength" disabled={!hasMedia} />
+          <DisclaimerFootnote onOpen={openAbout} />
         </>
       )}
     </div>

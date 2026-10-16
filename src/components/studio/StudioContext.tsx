@@ -27,6 +27,8 @@ export interface StudioCtx {
   mono: boolean;
   /** 필름 카드 썸네일 (키 = sim id, 필름 없음은 "none") */
   thumbs: Readonly<Record<string, string>>;
+  /** 정보 · 고지 시트 열기 */
+  openAbout(): void;
   /** 에디터가 비어 있으면 탭 비활성 */
   hasMedia: boolean;
 }

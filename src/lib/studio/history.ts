@@ -4,7 +4,12 @@ import { editReducer, getValue, SLIDERS, type EditAction, type EditState } from 
 export const HISTORY_LIMIT = 50;
 
 /** 히스토리가 되돌리는 단위: 편집 상태 + 입력 색공간 선택(InputChoice 문자열) */
-export interface Snap { edit: EditState; choice: string }
+export interface Snap {
+  edit: EditState;
+  choice: string;
+  /** 이 상태를 만든 조작의 명시적 이름 ("컬러 자동 보정" 등). 없으면 변경 항목에서 유추한다 */
+  label?: string;
+}
 export type SnapAction = EditAction | { type: "choice"; choice: string };
 
 export interface HistoryState {
@@ -19,7 +24,7 @@ export type HistoryAction =
   /** 드래그 중 실시간 갱신: 히스토리에 쌓지 않는다 */
   | { type: "live"; action: SnapAction }
   /** 단발성 조작: 즉시 1단계 기록 */
-  | { type: "do"; action: SnapAction }
+  | { type: "do"; action: SnapAction; label?: string }
   | { type: "begin" }
   | { type: "commit" }
   | { type: "undo" }
@@ -38,9 +43,9 @@ export function snapsEqual(a: Snap, b: Snap): boolean {
 }
 
 function applySnap(s: Snap, a: SnapAction): Snap {
-  if (a.type === "choice") return a.choice === s.choice ? s : { ...s, choice: a.choice };
+  if (a.type === "choice") return a.choice === s.choice ? s : { edit: s.edit, choice: a.choice };
   const edit = editReducer(s.edit, a);
-  return edit === s.edit ? s : { ...s, edit };
+  return edit === s.edit ? s : { edit, choice: s.choice };
 }
 
 const pushPast = (past: Snap[], s: Snap): Snap[] => [...past, s].slice(-HISTORY_LIMIT);
@@ -52,8 +57,9 @@ export function historyReducer(h: HistoryState, a: HistoryAction): HistoryState 
       return present === h.present ? h : { ...h, present };
     }
     case "do": {
-      const present = applySnap(h.present, a.action);
-      if (snapsEqual(present, h.present)) return h;
+      const applied = applySnap(h.present, a.action);
+      if (snapsEqual(applied, h.present)) return h;
+      const present: Snap = a.label ? { ...applied, label: a.label } : applied;
       // 드래그 중 단발 조작이 끼어들면 드래그 기준 상태를 기록해 한 단계로 묶는다
       const base = h.pending && !snapsEqual(h.pending, h.present) ? h.pending : h.present;
       // 드래그 기준 상태로 되돌아왔다면 실질 변화가 없으므로 기록하지 않는다
@@ -81,6 +87,7 @@ export function historyReducer(h: HistoryState, a: HistoryAction): HistoryState 
 
 /** 두 스냅샷 사이에서 바뀐 항목의 한국어 라벨 ("노출", "필름 변경", "노출 외 2개") */
 export function diffLabel(from: Snap, to: Snap): string {
+  if (to.label) return to.label;
   if (from.edit.simId !== to.edit.simId) return "필름 변경";
   const names: string[] = [];
   if (from.choice !== to.choice) names.push("입력 색공간");

@@ -12,6 +12,8 @@ import { filmBadgeLabel } from "@/lib/export/frame";
 import { computeAutoLight } from "@/lib/studio/auto-light";
 import { autoProfile, badgeText, type InputChoice } from "@/lib/studio/input-profile";
 import { initialEditState, selectSim, type EditAction, type SimInfo, type TabId } from "@/lib/studio/state";
+import { AboutSheet } from "./AboutSheet";
+import { computeAutoColor, solveEyedropper } from "@/lib/studio/color-auto";
 import { HistoryTimelineSheet } from "./HistoryTimelineSheet";
 import { historyReducer, historyTimeline, initialHistory, redoLabel, undoLabel } from "@/lib/studio/history";
 import { startThumbnails } from "@/lib/studio/thumbs";
@@ -276,6 +278,37 @@ export default function Studio() {
     }
   }, [renderer, asset, dispatch, toast]);
 
+  // ── 컬러 자동 보정 / WB 스포이트 ────────────────────────────────────────
+  const [picking, setPicking] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const runAutoColor = useCallback(() => {
+    if (!renderer || !asset) return;
+    try {
+      const r = computeAutoColor(renderer.readAnalysisRgb(256));
+      if (!r) { toast("분석할 수 있는 픽셀이 부족합니다. 순백·순흑이 대부분이라 자동 보정을 건너뜁니다."); return; }
+      histDispatch({ type: "do", label: "컬러 자동 보정", action: { type: "patch", values: { temp: r.temp, tint: r.tint, vibrance: r.vibrance, saturation: r.saturation } } });
+      toast("컬러 자동 보정 적용", { duration: 5000, actions: [{ label: "되돌리기", onClick: () => histDispatch({ type: "undo" }) }] });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e));
+    }
+  }, [renderer, asset, toast]);
+  const onPick = useCallback((u: number, v: number) => {
+    if (!renderer || !asset) return;
+    try {
+      const r = solveEyedropper(renderer.readAnalysisRgb(1024), u, v);
+      setPicking(false);
+      if (!r) { toast("선택한 지점이 너무 어두워 기준으로 쓸 수 없습니다. 더 밝은 흰색·회색 영역을 터치해 주세요."); return; }
+      histDispatch({ type: "do", label: "WB 스포이트", action: { type: "patch", values: { temp: r.temp, tint: r.tint } } });
+      toast(`WB 스포이트 적용 (색온도 ${r.temp}, 틴트 ${r.tint})`, { duration: 5000, actions: [{ label: "되돌리기", onClick: () => histDispatch({ type: "undo" }) }] });
+    } catch (e) {
+      setPicking(false);
+      toast(e instanceof Error ? e.message : String(e));
+    }
+  }, [renderer, asset, toast]);
+  // 다른 탭·새 미디어·로딩 중에는 스포이트 모드를 끈다
+  useEffect(() => { if (tab !== "color" || loading !== null) setPicking(false); }, [tab, loading]);
+  useEffect(() => { setPicking(false); }, [asset]);
+
   // ── 되돌리기 / 다시 실행 ─────────────────────────────────────────────────
   const undoText = undoLabel(hist);
   const redoText = redoLabel(hist);
@@ -316,7 +349,7 @@ export default function Studio() {
   const editKey = useMemo(() => JSON.stringify([state, compare, asset?.descriptor ?? null]), [state, compare, asset]);
 
   const ctx: StudioCtx = useMemo(
-    () => ({ state, dispatch, live, beginEdit, commitEdit, sims, iso, asset, file, renderer, toast, mono, thumbs, hasMedia: asset !== null }),
+    () => ({ state, dispatch, live, beginEdit, commitEdit, sims, iso, asset, file, renderer, toast, mono, thumbs, openAbout: () => setAboutOpen(true), hasMedia: asset !== null }),
     [state, dispatch, live, beginEdit, commitEdit, sims, iso, asset, file, renderer, toast, mono, thumbs],
   );
 
@@ -341,15 +374,17 @@ export default function Studio() {
           hasMedia={asset !== null} busy={loading !== null || exporting}
           p3Available={p3Ok} outSpace={outSpace} onOutSpace={changeOutSpace}
           undoLabel={undoText} redoLabel={redoText} undoDepth={hist.past.length} onUndo={undo} onRedo={redo}
-          timelineAvailable={timeline.length > 1} onTimeline={() => { if (!historyLocked && timeline.length > 1) setTimelineOpen(true); }}
+          historyCount={timeline.length - 1} onTimeline={() => { if (!historyLocked) setTimelineOpen(true); }}
         />
+        <AboutSheet open={aboutOpen} onClose={() => setAboutOpen(false)} />
         <HistoryTimelineSheet open={timelineOpen} entries={timeline} onJump={jumpTo} onClose={() => setTimelineOpen(false)} />
         <div className="studio-body">
           <Preview
             canvasRef={canvasRef} renderer={renderer} asset={asset} hdf={state.hdf} onToggleHdf={() => dispatch({ type: "toggleHdf" })}
             compare={compare} onCompare={setCompare} editKey={editKey} disabled={!asset || loading !== null} pauseVideoSignal={pauseSignal}
+            picking={picking} onPick={onPick}
           >
-            {!asset && !loading ? <EmptyState busy={!renderer} onOpen={() => fileInput.current?.click()} onDemo={() => void openDemo()} /> : null}
+            {!asset && !loading ? <EmptyState busy={!renderer} onOpen={() => fileInput.current?.click()} onDemo={() => void openDemo()} onAbout={() => setAboutOpen(true)} /> : null}
             {loading ? (
               <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3" style={{ background: "rgba(0,0,0,0.6)" }} role="status" aria-live="polite">
                 <span className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--line)] border-t-[var(--accent)]" />
@@ -366,7 +401,7 @@ export default function Studio() {
             <div className="studio-panel overflow-y-auto bg-[var(--panel)] px-4 py-2" style={{ touchAction: "pan-y" }}>
               {tab === "film" ? <FilmTab /> : null}
               {tab === "light" ? <LightTab onAuto={runAuto} /> : null}
-              {tab === "color" ? <ColorTab /> : null}
+              {tab === "color" ? <ColorTab onAuto={runAutoColor} picking={picking} onTogglePick={() => setPicking((p) => !p)} /> : null}
               {tab === "curve" ? <CurveTab /> : null}
               {tab === "detail" ? <DetailTab /> : null}
             </div>

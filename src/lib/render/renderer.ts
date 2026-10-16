@@ -16,7 +16,7 @@ import { toneInvTable, TONE_INV_N } from "./tone-inv-table";
 import { probeVideoOrientation, type OrientationProbeResult } from "./video-orientation-probe";
 import { VideoSource, type VideoStats } from "./video-source";
 import { p3Available, type OutputSpace } from "./output-space";
-import { colMajor, inv3, wbMatrix, type Mat3 } from "./wb";
+import { colMajor, IDENTITY3, inv3, wbMatrix, type Mat3 } from "./wb";
 
 export type { RendererCaps } from "./gl";
 
@@ -635,6 +635,15 @@ export class FilmRenderer {
     const R = this.renderSize();
     const c = this.chainParams(R);
     return this.graph.analysisLuma(c, c.src.tex, c.src.size, c.src.orient);
+  }
+
+  /** 컬러 자동 보정·WB 스포이트: WB 적용 전(항등)·노출 이득 1 의 WS 선형 RGBA, 표시 방향, 긴 변 `long`px. 비디오는 현재 표시 프레임 */
+  readAnalysisRgb(long = 256): { width: number; height: number; data: Float32Array } {
+    if (!this.asset || !this.srcTex || !this.srcSize) throw renderErrors.noSource();
+    if (this.asset.kind === "video") this.uploadVideoFrame();
+    const R = this.renderSize();
+    const c = this.chainParams(R);
+    return this.graph.analysisRgb(c, c.src.tex, c.src.size, c.src.orient, long, colMajor(IDENTITY3));
   }
 
   private renderNowInner(wantHist: boolean): { stats: RenderStats; hist: HistPixels | null } {
