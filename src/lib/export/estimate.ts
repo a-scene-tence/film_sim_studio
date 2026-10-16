@@ -20,8 +20,8 @@ export function fmtActualBytes(b: number): string {
 
 export interface MemoryPlan { need: number; fits: boolean }
 
-/** §10-4 (1) 메모리 검사: need > 0.8·budget 이면 저장 불가 */
-export function photoMemoryPlan(W: number, H: number, W2: number, H2: number, est: number, budgetBytes: number): MemoryPlan {
-  const need = W2 === W ? W * H * 4 * 2 + est : W * 1024 * 4 + W2 * H2 * 4 * 2 + est;
+/** §10-4 (1) 메모리 검사: need > 0.8·budget 이면 저장 불가. Step 5: 프레임을 켜면 프레임 포함 RGBA 사본(frameExtraBytes)이 더 필요하다 */
+export function photoMemoryPlan(W: number, H: number, W2: number, H2: number, est: number, budgetBytes: number, frameExtraBytes = 0): MemoryPlan {
+  const need = (W2 === W ? W * H * 4 * 2 + est : W * 1024 * 4 + W2 * H2 * 4 * 2 + est) + frameExtraBytes;
   return { need, fits: need <= 0.8 * budgetBytes };
 }

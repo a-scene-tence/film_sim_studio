@@ -120,3 +120,9 @@ Step 3 마스터 레시피(render/recipes.ts)의 0 이 아닌 값이 연동 키�
 | 13 | 레시피 | 저장 → 내보내기 → 삭제 → 가져오기 | 동일 값 복원 | **확인**: 가져오기 후 값 동일, 토스트 "레시피 1개 가져옴 · 0개 건너뜀" |
 | 14 | Vercel 배포 후 | `/`, `/lab/renderer`, `/없는경로`, `/manifest.webmanifest`, `/sw.js` | 200 / 200 / 404.html / 200 manifest+json / 200 no-cache | 사용자 확인 필요 (로컬 preview 에서는 같은 결과 확인) |
 | 15 | Vercel 프로젝트 설정 | Root Directory, vercel.json 의 Build/Output 덮어쓰기 | 빌드 로그 "sw.js: N files", out 업로드 | 사용자 확인 필요 |
+
+## Step 5 모바일 개선
+
+- **EXIF 필름 프레임** (`src/lib/export/frame.ts`, `frame-render.ts`): 저장 모달의 `EXIF 여백 프레임 추가` 토글(기본 OFF). 배경 화이트/블랙, 하단 여백형/4면 폴라로이드형. 1줄 = 바디·렌즈, 2줄 = 초점거리·조리개·셔터·ISO·촬영일시 + 필름 배지(예: `RICOH Positive Film + HDF`). 합성은 export 워커에서 하고(시스템 폰트만 사용), 원본 EXIF 는 그대로 재삽입하며 PixelXDimension/YDimension 만 프레임 포함 크기로 갱신, Orientation=1.
+- **동영상**: 오디오 트랙이 없거나 오디오 코덱 탐지가 실패해도 저장을 거부하지 않고 비디오만 인코딩한다. MediaRecorder 폴백은 `video/mp4;codecs=avc1,mp4a.40.2` → `video/mp4;codecs=hvc1` → `video/mp4` 를 먼저 시도하고 MP4 가 전혀 안 될 때만 `.webm`.
+- **Display P3 출력** (`src/lib/render/output-space.ts`): `(color-gamut: p3)` 와 WebGL2 `drawingBufferColorSpace='display-p3'` 가 모두 가능할 때만 헤더에 `sRGB / P3` 전환이 나타난다. 기본값은 sRGB 이며(GPU↔CPU 기준값 불변), P3 는 화면(캔버스) 출력에만 적용되는 색역 표현 변환(선형 sRGB→선형 P3 행렬, 전달함수 동일)이다. 렌더 수식·LUT 는 바꾸지 않으므로 색 자체는 같고, 저장 파일은 항상 sRGB 다. 색역 확장(P3 안쪽까지 쓰는 LUT/gamutMap)은 COLOR_SCIENCE 수식 확정이 필요해 이번 범위에서 제외했다.

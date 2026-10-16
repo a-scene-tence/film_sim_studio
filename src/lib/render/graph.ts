@@ -2,6 +2,7 @@
 import { computeAtmosphere, type Vec3 } from "./dehaze-atm";
 import { buildProgram, createLut3D, createTex2D, readFloatRGBA, renderErrors, TargetPool, type Program, type RendererCaps, type Sized, type Target } from "./gl";
 import type { PassName } from "./glsl";
+import { srgbToP3Uniform, type OutputSpace } from "./output-space";
 import type { ScalarUniforms } from "./params";
 import { fixedLongSize, graphSizes, levelSize, type HdfPlan, type MediaMode, type Size } from "./plan";
 
@@ -190,6 +191,8 @@ export class RenderGraph {
   }
 
   toneInvTex: WebGLTexture | null = null;
+  /** Step 5: 화면(캔버스) 출력 색공간. 오프스크린(타일·히스토그램·프로브)은 항상 sRGB */
+  outputSpace: OutputSpace = "srgb";
 
   /** HDF: L1 추출 → 2×2 피라미드 → 레벨별 분리 가우시안. wantHalo=false 면 core 만 */
   private hdf(c: ChainParams, ws: Target, R: Size, plan: HdfPlan, wantHalo: boolean): { core: Target; halo: Target | null } {
@@ -425,7 +428,8 @@ export class RenderGraph {
       pass: "final", target, size,
       v2: { uDstSize: [size.width, size.height], uGrainOff: c.grain.off, uCropOrigin: o.crop, uImgPxOrigin: o.imgPxOrigin, uTileOrigin: [0, 0], uImageSize: [size.width, size.height] },
       f: { uSharpen: c.s.uSharpen, uGrainAmt: c.s.uGrainAmt, uGrainScale: c.grain.scale },
-      i: { uDither: o.dither, uFlipY: o.flipY },
+      i: { uDither: o.dither, uFlipY: o.flipY, uOutConv: target === null && this.outputSpace === "display-p3" },
+      m3: { uOutM: srgbToP3Uniform() },
       tex: { uPost: post, uBlurL: blurL },
     });
   }

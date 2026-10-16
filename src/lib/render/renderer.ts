@@ -15,6 +15,7 @@ import type { LutStageRef, NormalizeCtx, PixelCtx } from "./reference";
 import { toneInvTable, TONE_INV_N } from "./tone-inv-table";
 import { probeVideoOrientation, type OrientationProbeResult } from "./video-orientation-probe";
 import { VideoSource, type VideoStats } from "./video-source";
+import { p3Available, type OutputSpace } from "./output-space";
 import { colMajor, inv3, wbMatrix, type Mat3 } from "./wb";
 
 export type { RendererCaps } from "./gl";
@@ -106,6 +107,29 @@ export class FilmRenderer {
   }
 
   private resizeObs: ResizeObserver | null = null;
+  private outSpace: OutputSpace = "srgb";
+
+  /** Step 5 §3: 이 기기·브라우저에서 화면 출력을 Display P3 로 바꿀 수 있는가 */
+  supportsP3(): boolean {
+    return p3Available(this.gl as unknown as { drawingBufferColorSpace?: string });
+  }
+
+  /** 화면(캔버스) 출력 색공간. 기본 sRGB. 미지원이면 sRGB 로 유지한다. 저장(타일 렌더)은 항상 sRGB */
+  setOutputSpace(space: OutputSpace): void {
+    this.outSpace = space === "display-p3" && this.supportsP3() ? "display-p3" : "srgb";
+    this.applyOutputSpace();
+    if (this.asset && !this.suspended) this.scheduleRender();
+  }
+
+  getOutputSpace(): OutputSpace {
+    return this.outSpace;
+  }
+
+  private applyOutputSpace(): void {
+    const gl = this.gl as unknown as { drawingBufferColorSpace?: string };
+    if ("drawingBufferColorSpace" in gl) gl.drawingBufferColorSpace = this.outSpace;
+    this.graph.outputSpace = this.outSpace;
+  }
 
   private buildGraph(): RenderGraph {
     const g = new RenderGraph(this.gl, this.caps);
@@ -140,6 +164,7 @@ export class FilmRenderer {
     this.videoFmt = null;
     this.atmPending = null;
     this.graph = this.buildGraph();
+    this.applyOutputSpace();
     this.lastChainSig = "";
     if (this.asset?.kind !== "video" && this.asset) this.uploadPhoto(this.asset);
     this.setParams(this.params);

@@ -1,4 +1,4 @@
-// docs/RENDERER.md 섹션 6 fs_final.glsl — 글자 그대로 옮긴 정본. 수정 금지.
+// docs/RENDERER.md 섹션 6 fs_final.glsl 정본. Step 5 에서 화면 출력 색공간 변환(uOutConv, 기본 false = 정본과 동일)만 추가했다.
 export const FS_FINAL_GLSL = `// ===== fs_final : S12 sharpen, S13 grain, S14 dither, output =====
 uniform sampler2D uPost;
 uniform sampler2D uBlurL;
@@ -10,6 +10,8 @@ uniform bool uDither;
 uniform bool uFlipY;         // true only when writing to the default framebuffer
 uniform vec2 uCropOrigin;    // texel offset of the written region inside uPost (tile padding)
 uniform vec2 uImgPxOrigin;   // global image pixel coordinate of the written region origin
+uniform bool uOutConv;       // Step 5: true 면 화면 출력을 sRGB 원색 → uOutM(Display P3) 으로 변환 (기본 false)
+uniform mat3 uOutM;
 out vec4 outColor;
 vec3 mod289v3(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
 vec2 mod289v2(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
@@ -64,6 +66,7 @@ void main() {
     float resp = sqrt(max(4.0 * vl * (1.0 - vl), 0.0));
     v = clamp(v + 0.07 * (uGrainAmt / 100.0) * resp * n, 0.0, 1.0);
   }
+  if (uOutConv) v = srgbEnc(clamp(uOutM * srgbDec(v), 0.0, 1.0));
   if (uDither) {
     uvec2 ip = uvec2(px);
     float n1 = float(pcg3d(uvec3(ip, 0u)).x) / 4294967296.0;

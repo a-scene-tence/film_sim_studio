@@ -1,8 +1,10 @@
 // Step 4 §10 사진 저장 파이프라인: 계획(메모리 검사) → 타일 렌더(renderTile) → 스트리밍 다운샘플/인코드(워커) → EXIF 재삽입·검증.
+import type { ExifSummary } from "../exif-manager";
 import { getBudget, type MediaAsset } from "../media-loader";
 import type { FilmRenderer } from "../render/renderer";
 import { estimateBytes, photoMemoryPlan, type PhotoFormat } from "./estimate";
 import { exportName } from "./filename";
+import { buildFrameText, framedSize, type FrameOptions, type FrameText } from "./frame";
 import { outSize, type SizeOption } from "./out-size";
 import { jpegOptions, type ExportMode } from "./photo-encode";
 import { tileGrid } from "./tile-grid";
@@ -14,6 +16,18 @@ export interface PhotoExportOptions {
   size: SizeOption;
   /** 용량 압축 모드 화질 60~98 */
   quality: number;
+  /** Step 5: EXIF 여백 프레임 (생략 = 끔) */
+  frame?: FrameOptions;
+}
+
+/** 프레임 각인에 필요한 정보: EXIF 요약 + 필름 배지 문구 */
+export interface FrameInfo { summary: ExifSummary | null | undefined; badge: string }
+export const frameOn = (o: PhotoExportOptions): boolean => o.frame?.enabled === true;
+
+/** 워커로 보낼 프레임 페이로드 (프레임이 꺼져 있으면 undefined) */
+export function framePayload(o: PhotoExportOptions, info: FrameInfo | undefined): { layout: FrameOptions["layout"]; theme: FrameOptions["theme"]; text: FrameText } | undefined {
+  if (!o.frame?.enabled) return undefined;
+  return { layout: o.frame.layout, theme: o.frame.theme, text: buildFrameText(info?.summary, info?.badge ?? "") };
 }
 
 export const defaultPhotoOptions = (): PhotoExportOptions => ({ format: "jpeg", mode: "original", size: "full", quality: 90 });
@@ -24,7 +38,8 @@ export function effectiveSize(o: PhotoExportOptions): SizeOption {
 }
 
 export function encoderOptions(o: PhotoExportOptions, W2: number, H2: number) {
-  return jpegOptions({ mode: o.mode, quality: o.quality, width: W2, height: H2 });
+  const f = framedSize(W2, H2, o.frame ?? { enabled: false, theme: "white", layout: "bottom" });
+  return jpegOptions({ mode: o.mode, quality: o.quality, width: f.width, height: f.height });
 }
 
 export interface PhotoPlan {
@@ -41,10 +56,13 @@ export const HOPELESS_MSG = "이 사진은 이 기기에서 저장할 수 없습
 export function planPhoto(asset: Pick<MediaAsset, "displaySize">, o: PhotoExportOptions, est: number, budgetBytes = getBudget().budgetBytes): PhotoPlan {
   const { width: W, height: H } = asset.displaySize;
   const s = outSize(W, H, effectiveSize(o));
-  const m = photoMemoryPlan(W, H, s.width, s.height, est, budgetBytes);
+  const fs = framedSize(s.width, s.height, o.frame ?? { enabled: false, theme: "white", layout: "bottom" });
+  const extra = frameOn(o) ? fs.width * fs.height * 4 : 0;
+  const m = photoMemoryPlan(W, H, s.width, s.height, est, budgetBytes, extra);
   const small = outSize(W, H, 2048);
-  const hopeless = !m.fits && !photoMemoryPlan(W, H, small.width, small.height, est, budgetBytes).fits;
-  return { W, H, W2: s.width, H2: s.height, need: m.need, fits: m.fits, hopeless };
+  const sf = framedSize(small.width, small.height, o.frame ?? { enabled: false, theme: "white", layout: "bottom" });
+  const hopeless = !m.fits && !photoMemoryPlan(W, H, small.width, small.height, est, budgetBytes, frameOn(o) ? sf.width * sf.height * 4 : 0).fits;
+  return { W, H, W2: fs.width, H2: fs.height, need: m.need, fits: m.fits, hopeless };
 }
 
 /** Step 2 가 삽입할 EXIF 세그먼트 바이트 길이의 근사: TIFF 본문 + APP1 헤더 10바이트 */
@@ -54,13 +72,16 @@ export function exifSegmentLength(asset: Pick<MediaAsset, "exif">): number {
 }
 
 /** §10-6 프록시를 한 번 렌더해(RGBA8) 같은 옵션으로 인코드한 바이트 → 예상 용량 */
-export async function estimatePhoto(client: ExportClient, renderer: FilmRenderer, asset: MediaAsset, o: PhotoExportOptions, proxyCache?: { width: number; height: number; data: Uint8ClampedArray }): Promise<number> {
+export async function estimatePhoto(client: ExportClient, renderer: FilmRenderer, asset: MediaAsset, o: PhotoExportOptions, proxyCache?: { width: number; height: number; data: Uint8ClampedArray }, frameInfo?: FrameInfo): Promise<number> {
   const { width: W, height: H } = asset.displaySize;
   const s = outSize(W, H, effectiveSize(o));
   const snap = proxyCache ?? renderer.snapshotPreview();
   const copy = new Uint8ClampedArray(snap.data); // 워커로 보내면 버퍼가 분리되므로 복사본을 보낸다
-  const r = await client.call({ type: "estimate", rgba: copy.buffer, w: snap.width, h: snap.height, format: o.format, options: encoderOptions(o, s.width, s.height) }, [copy.buffer]);
-  return estimateBytes(r.length ?? 0, snap.width * snap.height, s.width * s.height, o.format, exifSegmentLength(asset));
+  const off = { enabled: false, theme: "white", layout: "bottom" } as const;
+  const fp = framedSize(snap.width, snap.height, o.frame ?? off);
+  const fo = framedSize(s.width, s.height, o.frame ?? off);
+  const r = await client.call({ type: "estimate", rgba: copy.buffer, w: snap.width, h: snap.height, format: o.format, options: encoderOptions(o, s.width, s.height), frame: framePayload(o, frameInfo) }, [copy.buffer]);
+  return estimateBytes(r.length ?? 0, fp.width * fp.height, fo.width * fo.height, o.format, exifSegmentLength(asset));
 }
 
 export interface ExportProgress { value: number; phase: "render" | "encode" | "exif"; tile: number; tiles: number }
@@ -68,7 +89,7 @@ export interface ExportJob { cancelled: boolean }
 export interface PhotoResult { blob: Blob; file: File; width: number; height: number; bytes: number; report: string[] }
 
 export async function exportPhoto(args: {
-  renderer: FilmRenderer; client: ExportClient; asset: MediaAsset; simId: string | null; options: PhotoExportOptions; job: ExportJob;
+  renderer: FilmRenderer; client: ExportClient; asset: MediaAsset; simId: string | null; options: PhotoExportOptions; job: ExportJob; frameInfo?: FrameInfo;
   start: Date; onProgress(p: ExportProgress): void;
 }): Promise<PhotoResult> {
   const { renderer, client, asset, options: o, job } = args;
@@ -107,12 +128,14 @@ export async function exportPhoto(args: {
     check();
     args.onProgress({ value: 0.8, phase: "encode", tile: tiles.length, tiles: tiles.length });
     const options = encoderOptions(o, W2, H2);
+    const frame = framePayload(o, args.frameInfo);
+    const out = framedSize(W2, H2, o.frame ?? { enabled: false, theme: "white", layout: "bottom" });
     let enc;
     if (full) {
       const buf = full.buffer as ArrayBuffer;
-      enc = await client.call({ type: "encode-full", rgba: buf, w: W, h: H, format: o.format, options }, [buf]);
+      enc = await client.call({ type: "encode-full", rgba: buf, w: W, h: H, format: o.format, options, frame }, [buf]);
     } else {
-      enc = await client.call({ type: "down-end", format: o.format, options });
+      enc = await client.call({ type: "down-end", format: o.format, options, frame });
     }
     check();
     if (!enc.bytes) throw new Error("인코드 결과가 비어 있습니다 — 다시 시도하세요");
@@ -120,7 +143,7 @@ export async function exportPhoto(args: {
     let bytes = enc.bytes;
     const payload = asset.exif?.payload;
     if (payload) {
-      const r = await client.call({ type: "exif", bytes, format: o.format, payload, outSize: { width: W2, height: H2 } }, [bytes]);
+      const r = await client.call({ type: "exif", bytes, format: o.format, payload, outSize: out }, [bytes]);
       if (!r.bytes) throw new Error("EXIF 삽입 결과가 비어 있습니다 — 다시 시도하세요");
       bytes = r.bytes;
       report.push(...(r.report ?? []));
@@ -131,7 +154,7 @@ export async function exportPhoto(args: {
     const type = o.format === "jpeg" ? "image/jpeg" : "image/png";
     const blob = new Blob([bytes], { type });
     const file = new File([blob], exportName(asset.fileName, args.simId, args.start, ext), { type });
-    return { blob, file, width: W2, height: H2, bytes: blob.size, report };
+    return { blob, file, width: out.width, height: out.height, bytes: blob.size, report };
   } finally {
     renderer.setSuspended(false);
   }

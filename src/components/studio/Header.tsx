@@ -1,5 +1,6 @@
 "use client";
 import { useRef } from "react";
+import type { OutputSpace } from "@/lib/render/output-space";
 import { IconInfo, IconOpen } from "./icons";
 
 export const ACCEPT_FALLBACK = "image/*,video/*,.dng,.arw,.cr2,.cr3,.nef,.raf,.orf,.rw2,.pef,.srw,.heic,.heif,.mov,.mp4,.webm";
@@ -16,6 +17,10 @@ export interface HeaderProps {
   onSave(): void;
   hasMedia: boolean;
   busy: boolean;
+  /** Step 5: Display P3 출력을 쓸 수 있을 때만 전환 버튼을 보인다 */
+  p3Available?: boolean;
+  outSpace?: OutputSpace;
+  onOutSpace?(s: OutputSpace): void;
 }
 
 /** Step 4 §7-3 ① 헤더: 높이 52px + safe-area 위쪽, 좌우 12px */
@@ -36,6 +41,16 @@ export function Header(p: HeaderProps) {
         </button>
       ) : null}
       {p.demo ? <span className="shrink-0 whitespace-nowrap rounded-full bg-[var(--panel-2)] px-2 py-0.5 text-[11px] text-[var(--accent)]">데모</span> : null}
+      {p.p3Available ? (
+        <button
+          type="button" aria-label={`색공간 출력: ${p.outSpace === "display-p3" ? "Display P3" : "sRGB"} (탭하여 전환)`} aria-pressed={p.outSpace === "display-p3"}
+          className="flex h-11 shrink-0 items-center" onClick={() => p.onOutSpace?.(p.outSpace === "display-p3" ? "srgb" : "display-p3")}
+        >
+          <span className="flex h-8 items-center whitespace-nowrap rounded-full border border-[var(--line)] bg-[var(--panel-2)] px-3 text-[12px]" style={p.outSpace === "display-p3" ? { color: "var(--accent)", borderColor: "var(--accent)" } : undefined}>
+            {p.outSpace === "display-p3" ? "P3" : "sRGB"}
+          </span>
+        </button>
+      ) : null}
       <div className="flex-1" />
       <button type="button" aria-label="EXIF 정보" disabled={!p.hasMedia} className="flex h-11 w-11 items-center justify-center text-[var(--text)] disabled:opacity-40" onClick={p.onExif}><IconInfo /></button>
       <button type="button" disabled={!p.hasMedia || p.busy} className="flex h-11 shrink-0 items-center disabled:opacity-40" onClick={p.onSave}>

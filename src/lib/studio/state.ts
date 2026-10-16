@@ -194,7 +194,7 @@ export function fromCurveState(c: CurveState): EditCurve {
 export { curveOn, LINEAR_CURVE };
 
 // ── 필름 조회 (F) ─────────────────────────────────────────────────────────
-export interface SimInfo { id: string; ko: string; brand: "fujifilm" | "ricoh"; mono: boolean }
+export interface SimInfo { id: string; ko: string; en?: string; brand: "fujifilm" | "ricoh"; mono: boolean }
 /** simRecipe(simId): Step 3 마스터 레시피 + manifest 의 mono 여부. 필름 없음은 mono=false */
 export function simRecipe(simId: string | null, sims: ReadonlyArray<SimInfo>): { recipe: ReturnType<typeof recipeFor>; mono: boolean; ko: string } {
   const info = simId === null ? null : (sims.find((x) => x.id === simId) ?? null);

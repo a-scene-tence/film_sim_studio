@@ -65,6 +65,20 @@ export function audioPlan(container: "mp4" | "webm", ac: AudioCodecId | null, ca
 
 export const NO_AUDIO: AudioPlan = { mode: "none", codec: null, warning: null };
 
+/**
+ * Step 5 §2 무음 영상 허용: 오디오 트랙이 없으면 경고 없이 비디오만 인코딩한다(NO_AUDIO).
+ * 트랙이 있어도 코덱 탐지가 실패하면 영상 저장을 거부하지 않고 소리 없이 저장한다(WARN_W2).
+ */
+export async function planAudioSafe(hasTrack: boolean, container: "mp4" | "webm", probe: () => Promise<{ codec: AudioCodecId | null; caps: AudioCaps }>): Promise<AudioPlan> {
+  if (!hasTrack) return NO_AUDIO;
+  try {
+    const { codec, caps } = await probe();
+    return audioPlan(container, codec, caps);
+  } catch {
+    return { mode: "none", codec: null, warning: WARN_W2 };
+  }
+}
+
 /** 예상 용량: est = round(((B + Ba)/8)·D), Ba = copy ? (원본 비트레이트 ?? 192000) : transcode ? 192000 : 0 */
 export function estimateVideoBytes(B: number, audio: AudioPlan, sourceAudioBitrate: number | null, durationSec: number): number {
   const Ba = audio.mode === "copy" ? (sourceAudioBitrate ?? 192000) : audio.mode === "transcode" ? 192000 : 0;
