@@ -26,7 +26,7 @@ export const viewport: Viewport = {
   colorScheme: 'dark',
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="ko" className="h-full antialiased">
       <body className="min-h-full flex flex-col bg-[#0b0b0c] text-[#f2f2f2]">{children}</body>
