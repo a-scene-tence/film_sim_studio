@@ -13,7 +13,7 @@
   primaries.mjs, transfer.mjs, normalize.mjs (JSDoc 타입, 외부 의존성 0)
 - src/workers/media-decode.worker.ts
 - src/app/lab/media/page.tsx
-- scripts/vendor-libraw.mjs
+- scripts/vendor-assets.mjs
 - tests/fixtures/exif-ii.jpg.b64 (섹션 15 픽스처)
 - tests/*.test.ts (섹션 15)
 

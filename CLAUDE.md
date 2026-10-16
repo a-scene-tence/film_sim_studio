@@ -26,6 +26,7 @@
 6. 결정론: 같은 입력 + 같은 파라미터 = 같은 출력. 생성 산출물에 타임스탬프나 무작위값을 넣지 않는다(그레인·디더는 명세된 해시/시드 사용).
 7. 모바일 UI: 터치 타깃 ≥ 44×44 CSS px, env(safe-area-inset-*) 대응, 다크 UI 기본, 한국어 UI 문구.
 8. 의존성은 MIT/BSD/Apache-2.0/ISC/Zlib 라이선스만 허용한다(LGPL WASM 은 별도 파일 동적 로드일 때만 허용). 추가 시 라이선스와 번들 증가량을 보고한다.
+   MPL-2.0 은 수정하지 않은 npm 의존성으로 설치해 import 하는 경우에만 허용한다(현재 mediabunny 1개). MPL-2.0 소스 파일을 저장소에 복사·수정·벤더링하는 것은 금지한다. 고지 파일에 이름·버전·라이선스·소스 URL 을 기재한다.
 9. 모든 커밋 전에 npm run verify 를 통과시킨다.
 10. 공개 API 는 src/lib/media-loader.ts, src/lib/exif-manager.ts 두 파사드다. UI 는 내부 모듈을 직접 import 하지 않는다.
 11. libraw-wasm 은 /vendor/libraw-wasm/1.6.0/ 정적 경로 + nativeImport 로만 로드한다. crossOriginIsolated 가 아니면 RAW 는 내장 프리뷰 전용으로 연다.
@@ -48,7 +49,7 @@
 - src/lib/exif/ [S2] binstr.ts, extract.ts, summary.ts, display.ts, dict.ts, serialize.ts, insert-jpeg.ts, insert-png.ts, xmp.ts, iptc.ts, crc32.ts
 - src/lib/color/source/ [S2] primaries.mjs, transfer.mjs, normalize.mjs (소스 정규화 §3·§4, 외부 의존성 0)
 - src/workers/media-decode.worker.ts [S2], src/app/lab/media/page.tsx [S2]
-- scripts/vendor-libraw.mjs [S2] (public/vendor/ 는 설치 시 생성, 커밋 금지), public/licenses/THIRD_PARTY.txt [S2], docs/MEDIA_PIPELINE.md [S2]
+- scripts/vendor-assets.mjs [S2, S4 일반화] (public/vendor/ 는 설치 시 생성, 커밋 금지), public/licenses/THIRD_PARTY.txt [S2], docs/MEDIA_PIPELINE.md [S2]
 - tests/fixtures/exif-ii.jpg.b64 [S2], tests/helpers/ [S2]
 - src/sw/ + manifest.webmanifest [S4]
 - src/lib/render/ (WebGL2 멀티패스 렌더러, glsl/ = GLSL ES 3.00 정본, docs/RENDERER.md) [S3], src/components/editor/ [S3], src/app/lab/renderer/page.tsx [S3]
