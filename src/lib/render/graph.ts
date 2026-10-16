@@ -3,7 +3,7 @@ import { computeAtmosphere, type Vec3 } from "./dehaze-atm";
 import { buildProgram, createLut3D, createTex2D, readFloatRGBA, renderErrors, TargetPool, type Program, type RendererCaps, type Sized, type Target } from "./gl";
 import type { PassName } from "./glsl";
 import type { ScalarUniforms } from "./params";
-import { graphSizes, levelSize, type HdfPlan, type MediaMode, type Size } from "./plan";
+import { fixedLongSize, graphSizes, levelSize, type HdfPlan, type MediaMode, type Size } from "./plan";
 
 type TexLike = WebGLTexture | Target;
 
@@ -62,9 +62,11 @@ export interface ChainParams {
   hdfPlan: HdfPlan;
 }
 
-export type PreviewOutput = { kind: "canvas" } | { kind: "probe" };
+/** hist: Step 4 §8-4 — 캔버스 출력 직후 같은 체인을 RGBA8 로 한 번 더 그려 긴 변 256 으로 다운샘플한 픽셀을 돌려준다 */
+export type PreviewOutput = { kind: "canvas"; hist?: boolean } | { kind: "probe" };
+export interface HistPixels { width: number; height: number; data: Uint8Array }
 export interface AtmRequest { value: Vec3; refresh: "none" | "sync" | "async" }
-export interface PreviewResult { passes: number; atm: Vec3; probeTarget: Target | null; dzA: Target | null }
+export interface PreviewResult { passes: number; atm: Vec3; probeTarget: Target | null; dzA: Target | null; hist: HistPixels | null }
 
 export interface TileChain {
   base: ChainParams;
@@ -159,7 +161,7 @@ export class RenderGraph {
   // ── 공통 유니폼 ──────────────────────────────────────────────────────────
   private lib(c: ChainParams, core: Target | null, halo: Target | null, trans: Target | null, atm: Vec3, size: Sized, tileOrigin: readonly [number, number] = [0, 0], imageSize: Sized = size) {
     return {
-      f: { uDehaze: c.s.uDehaze, uKe: c.s.uKe, uKb: c.s.uKb },
+      f: { uDehaze: c.s.uDehaze, uKe: c.s.uKe, uKb: c.s.uKb, uHdfK: c.s.uHdfK },
       i: { uHdf: c.hdf, uMono: c.mono, uCurveOn: c.curve.on },
       v2: { uDstSize: [size.width, size.height] as const, uTileOrigin: tileOrigin, uImageSize: [imageSize.width, imageSize.height] as const },
       v3: { uAtm: atm },
@@ -344,15 +346,47 @@ export class RenderGraph {
     const blurL = this.sharpenBlur(c, post, R);
     // 9. final
     let probeTarget: Target | null = null;
+    let hist: HistPixels | null = null;
     if (output.kind === "canvas") {
       this.finalPass(c, null, R, post, blurL, { flipY: true, dither: true, crop: [0, 0], imgPxOrigin: [0, 0] });
+      if (output.hist) hist = this.histogramPixels(c, R, post, blurL);
     } else {
       probeTarget = this.pool.acquire(R.width, R.height, "rgba16f");
       this.finalPass(c, probeTarget, R, post, blurL, { flipY: false, dither: false, crop: [0, 0], imgPxOrigin: [0, 0] });
     }
     this.pool.release(post);
     this.pool.release(blurL);
-    return { passes: this.passes, atm, probeTarget, dzA };
+    return { passes: this.passes, atm, probeTarget, dzA, hist };
+  }
+
+  /** Step 4 §8-4 (1)(2)(3): fs_final(uFlipY=false) → RGBA8 → fs_hist 로 긴 변 256 → readPixels */
+  private histogramPixels(c: ChainParams, R: Size, post: Target, blurL: Target | null): HistPixels {
+    const src = this.pool.acquire(R.width, R.height, "rgba8");
+    this.finalPass(c, src, R, post, blurL, { flipY: false, dither: true, crop: [0, 0], imgPxOrigin: [0, 0] });
+    const H = fixedLongSize(R, 256);
+    const dst = this.pool.acquire(H.width, H.height, "rgba8");
+    this.draw({ pass: "hist", target: dst, size: H, v2: { uDstSize: [H.width, H.height], uTileOrigin: [0, 0], uImageSize: [H.width, H.height] }, tex: { uIn: src } });
+    const gl = this.gl;
+    const data = new Uint8Array(H.width * H.height * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
+    gl.readPixels(0, 0, H.width, H.height, gl.RGBA, gl.UNSIGNED_BYTE, data);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this.pool.release(src);
+    this.pool.release(dst);
+    return { width: H.width, height: H.height, data };
+  }
+
+  /** Step 4 §9-1: fs_normalize(S0)를 uExpGain=1 로, 긴 변 256 RGBA16F 타깃에 그려 Y = 0.2126R + 0.7152G + 0.0722B 배열을 돌려준다 */
+  analysisLuma(c: ChainParams, srcTex: WebGLTexture, srcSize: Size, orient: number): Float32Array {
+    const A = fixedLongSize(c.R, 256);
+    const t = this.pool.acquire(A.width, A.height, "rgba16f");
+    const c1: ChainParams = { ...c, R: A, s: { ...c.s, uExpGain: 1 } };
+    this.normalize(c1, A, srcTex, srcSize, orient, t);
+    const px = readFloatRGBA(this.gl, t);
+    this.pool.release(t);
+    const Y = new Float32Array(A.width * A.height);
+    for (let i = 0; i < Y.length; i++) Y[i] = 0.2126 * px[i * 4]! + 0.7152 * px[i * 4 + 1]! + 0.0722 * px[i * 4 + 2]!;
+    return Y;
   }
 
   private mainPass(c: ChainParams, out: Target, size: Size, ws: Target, core: Target | null, halo: Target | null, trans: Target | null, toneAB: Target | null, atm: Vec3, tileOrigin: [number, number], imageSize: Size): void {
@@ -360,7 +394,7 @@ export class RenderGraph {
     this.draw(this.merge(this.lib(c, core, halo, trans, atm, size, tileOrigin, imageSize), {
       pass: "main", target: out, size,
       i: { uToneOps: c.toneOps, uLutMode: L.mode, uLutN: L.N, uLutDomain: L.domain, uLutInVR: L.inVR, uLutOutVR: L.outVR },
-      f: { uSh: c.s.uSh, uHi: c.s.uHi, uWh: c.s.uWh, uBk: c.s.uBk, uBr: c.s.uBr, uLb: c.s.uLb, uCt: c.s.uCt, uVig: c.s.uVig },
+      f: { uSh: c.s.uSh, uHi: c.s.uHi, uWh: c.s.uWh, uBk: c.s.uBk, uBr: c.s.uBr, uLb: c.s.uLb, uCt: c.s.uCt, uVig: c.s.uVig, uFilmStrength: c.s.uFilmStrength },
       v3: { uLutDomMin: L.min, uLutDomMax: L.max },
       m3: { uWsToSG3C: c.wsToSG3C },
       tex: { uWS: ws, uToneAB: toneAB, uLut: L.tex },
@@ -371,6 +405,7 @@ export class RenderGraph {
     this.draw(this.merge(this.lib(c, null, null, null, [0, 0, 0], size, tileOrigin, imageSize), {
       pass: "post", target: out, size,
       f: { uSat: c.s.uSat, uVib: c.s.uVib, uClarity: c.s.uClarity },
+      v2: { uMonoTint: c.s.uMonoTint },
       tex: { uMainTex: main, uClarAB: clarAB },
     }));
   }

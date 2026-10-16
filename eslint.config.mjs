@@ -12,6 +12,7 @@ const eslintConfig = defineConfig([
     "out/**",
     "public/luts/**",
     "public/vendor/**",
+    "scripts/sw-template.js",
     "build/**",
     "next-env.d.ts",
   ]),

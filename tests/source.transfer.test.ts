@@ -59,8 +59,9 @@ describe("12.4 toWorkingSpace 골든", () => {
   it("slog3/s-gamut3-cine/limited", () => close(toWorkingSpace([356 / 876, 356 / 876, 356 / 876], desc("slog3", "s-gamut3-cine", "limited")), [0.18, 0.18, 0.18], 1e-5));
   it("hlg/rec2020", () => close(toWorkingSpace([0.38, 0.38, 0.38], desc("hlg", "rec2020")), [0.18, 0.18, 0.18], 1e-5));
   it("raw-linear", () => close(toWorkingSpace([0.5, 0.5, 0.5], desc("raw-linear", "srgb", "full", 2.04)), [1.02, 1.02, 1.02], 1e-5));
-  it("PQ / LUT 필요", () => {
+  it("PQ 는 예외, Samsung Log / D-Log M 은 LUT 없이도 내장 변환 (Step 4 §4)", () => {
     expect(() => toWorkingSpace([0.5, 0.5, 0.5], desc("pq"))).toThrow();
-    expect(() => toWorkingSpace([0.5, 0.5, 0.5], desc("dlogm", "rec2020"))).toThrow();
+    expect(() => toWorkingSpace([0.5, 0.5, 0.5], desc("dlogm", "rec2020"))).not.toThrow();
+    expect(() => toWorkingSpace([0.5, 0.5, 0.5], desc("samsunglog", "rec2020"))).not.toThrow();
   });
 });

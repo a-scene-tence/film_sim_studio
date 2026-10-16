@@ -49,9 +49,9 @@ export interface Target { tex: WebGLTexture; fbo: WebGLFramebuffer; width: numbe
 export interface Sized { width: number; height: number }
 
 /** 섹션 4.2-1 컨텍스트 */
-export function createContext(canvas: HTMLCanvasElement): WebGL2RenderingContext {
+export function createContext(canvas: HTMLCanvasElement, opts: { preserveDrawingBuffer?: boolean } = {}): WebGL2RenderingContext {
   const gl = canvas.getContext("webgl2", {
-    alpha: false, antialias: false, depth: false, stencil: false, premultipliedAlpha: false, preserveDrawingBuffer: false, powerPreference: "high-performance",
+    alpha: false, antialias: false, depth: false, stencil: false, premultipliedAlpha: false, preserveDrawingBuffer: opts.preserveDrawingBuffer === true, powerPreference: "high-performance",
   });
   if (!gl) throw renderErrors.noWebgl2();
   return gl;

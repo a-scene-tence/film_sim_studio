@@ -9,6 +9,12 @@ export function scaledSize(R: Size, longTarget: number): Size {
   return { width: Math.max(1, Math.round((R.width * longTarget) / L)), height: Math.max(1, Math.round((R.height * longTarget) / L)) };
 }
 
+/** 긴 변을 정확히 longTarget 으로 맞춘 크기 (Step 4 §8-4, §9-1): 짧은 변 = max(1, round(longTarget·짧은/긴)). 확대도 허용 */
+export function fixedLongSize(R: Size, longTarget: number): Size {
+  const L = Math.max(R.width, R.height);
+  return { width: Math.max(1, Math.round((R.width * longTarget) / L)), height: Math.max(1, Math.round((R.height * longTarget) / L)) };
+}
+
 export interface GraphSizes {
   R: Size; A: Size; D: Size; aLong: number; dLong: number;
   /** 가이드 반경: 베이스 톤, 명료도, 디헤이즈 */

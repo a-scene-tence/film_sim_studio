@@ -1,4 +1,4 @@
-// docs/RENDERER.md 섹션 6 fs_main.glsl — 글자 그대로 옮긴 정본. 수정 금지.
+// docs/RENDERER.md 섹션 6 fs_main.glsl — 정본. Step 4 §5-3 패치(uFilmStrength, lutRaw/lutStage)만 허용.
 export const FS_MAIN_GLSL = `// ===== fs_main : S1~S7 (HDF, dehaze, base tone, contrast, vignette, clip, film LUT) =====
 uniform sampler2D uWS;
 uniform bool uToneOps;
@@ -15,6 +15,7 @@ uniform bool uLutOutVR;
 uniform vec3 uLutDomMin;
 uniform vec3 uLutDomMax;
 uniform mat3 uWsToSG3C;
+uniform float uFilmStrength; // 0..1 (UI 0..100 %, default 1)
 out vec4 outColor;
 vec3 baseTone(vec3 x, vec2 uvG) {
   float Y = dot(LUMA, x);
@@ -59,8 +60,7 @@ vec3 clipNeg(vec3 x) {
 }
 float slog3Enc(float x) { return x >= 0.01125 ? (420.0 + log2((x + 0.01) / 0.19) * 0.30102999566398 * 261.5) / 1023.0 : (x * (171.2102946929 - 95.0) / 0.01125 + 95.0) / 1023.0; }
 vec3 toneRef3(vec3 x) { return vec3(toneRef(x.r), toneRef(x.g), toneRef(x.b)); }
-vec3 lutStage(vec3 x) {
-  if (uLutMode == 0) return srgbEnc(toneRef3(x));
+vec3 lutRaw(vec3 x) {
   if (uLutMode == 1) return lutTetra(uLut, uLutN, vec3(shaperEnc1(x.r), shaperEnc1(x.g), shaperEnc1(x.b)));
   vec3 u;
   if (uLutDomain == 0) u = srgbEnc(toneRef3(x));
@@ -72,6 +72,13 @@ vec3 lutStage(vec3 x) {
   vec3 o = lutTetra(uLut, uLutN, u);
   if (uLutOutVR) o = (o * 1023.0 - 64.0) / 876.0;
   return clamp(o, 0.0, 1.0);
+}
+vec3 lutStage(vec3 x) {
+  vec3 vNone = srgbEnc(toneRef3(x));
+  if (uLutMode == 0) return vNone;
+  vec3 vSim = lutRaw(x);
+  if (uFilmStrength >= 1.0) return vSim;
+  return srgbEnc(mix(srgbDec(vNone), srgbDec(vSim), clamp(uFilmStrength, 0.0, 1.0)));
 }
 void main() {
   vec2 uvL = uvLocal();

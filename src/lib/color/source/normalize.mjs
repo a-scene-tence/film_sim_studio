@@ -10,10 +10,10 @@ import * as T from "./transfer.mjs";
  * @typedef {{ size: number, data: ArrayLike<number> }} SourceLut
  */
 
-const LOG_PROFILES = new Set(["slog3", "slog2", "flog", "flog2", "clog3", "vlog", "nlog"]);
+const LOG_PROFILES = new Set(["slog3", "slog2", "flog", "flog2", "clog3", "vlog", "nlog", "samsunglog"]);
 const DECODERS = /** @type {Record<string, (y: number) => number>} */ ({
   slog3: T.slog3, slog2: T.slog2, flog: T.flog, flog2: T.flog2, clog3: T.clog3,
-  vlog: T.vlog, nlog: T.nlog, dlog: T.dlog, applelog: T.applelog, hlg: T.hlg,
+  vlog: T.vlog, nlog: T.nlog, dlog: T.dlog, applelog: T.applelog, hlg: T.hlg, samsunglog: T.samsunglog,
 });
 
 /** 소스 LUT 가 필요한데 없을 때 던지는 예외 코드 */
@@ -58,16 +58,17 @@ export function decodeChannel(v, d) {
  */
 export function toWorkingSpace(v, d, sourceLut) {
   if (d.profile === "pq") throw coded(PQ_UNSUPPORTED, "HDR10(PQ) 영상은 지원하지 않습니다");
-  let x;
-  if (d.profile === "samsunglog" || d.profile === "dlogm") {
-    if (!sourceLut) throw coded(SOURCE_TRANSFORM_LUT_REQUIRED, "공식 변환 LUT 등록이 필요합니다 — /lab/luts 에서 등록");
-    const out = tetraSample(sourceLut.data, sourceLut.size, [codeValue(/** @type {number} */ (v[0]), d), codeValue(/** @type {number} */ (v[1]), d), codeValue(/** @type {number} */ (v[2]), d)]);
+  if ((d.profile === "samsunglog" || d.profile === "dlogm") && sourceLut) {
+    // 사용자 공식 LUT(profile 13): LUT 출력은 Rec.709 표시 인코딩이며 WS 와 같은 원색이다 (Step 3 소스 LUT 규칙)
+    const out = tetraSample(sourceLut.data, sourceLut.size, [/** @type {number} */ (v[0]), /** @type {number} */ (v[1]), /** @type {number} */ (v[2])]);
     const d709 = { ...d, profile: "rec709" };
-    x = [decodeChannel(out[0], d709), decodeChannel(out[1], d709), decodeChannel(out[2], d709)];
-  } else {
-    x = [decodeChannel(/** @type {number} */ (v[0]), d), decodeChannel(/** @type {number} */ (v[1]), d), decodeChannel(/** @type {number} */ (v[2]), d)];
+    return [decodeChannel(out[0], d709), decodeChannel(out[1], d709), decodeChannel(out[2], d709)];
   }
-  return apply3(matrixToWS(d.primaries), x);
+  // 내장 변환 (Step 4 §4-1, §4-2): Samsung Log = 공식 수식 + Rec.2020, D-Log M = D-Log 곡선 + D-Gamut 근사
+  const eff = d.profile === "dlogm" ? { ...d, profile: "dlog", primaries: /** @type {import("./primaries.mjs").PrimariesId} */ ("d-gamut"), range: /** @type {"full"} */ ("full") }
+    : d.profile === "samsunglog" ? { ...d, primaries: /** @type {import("./primaries.mjs").PrimariesId} */ ("rec2020") } : d;
+  const x = [decodeChannel(/** @type {number} */ (v[0]), eff), decodeChannel(/** @type {number} */ (v[1]), eff), decodeChannel(/** @type {number} */ (v[2]), eff)];
+  return apply3(matrixToWS(eff.primaries), x);
 }
 
 // ── 대량 처리용 CPU 가속 (표시 전용 경로) ─────────────────────────────────────

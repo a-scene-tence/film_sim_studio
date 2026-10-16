@@ -269,8 +269,8 @@ export default function MediaLab() {
                 className={`${btn} ${asset?.descriptor.profile === p ? "ring-2 ring-emerald-500" : ""}`}>{PROFILE_LABEL[p]}</button>
             ))}
           </div>
-          {(det.requiresSourceLut || asset?.descriptor.profile === "samsunglog" || asset?.descriptor.profile === "dlogm") && (
-            <Link href="/lab/luts" className={`${btn} mt-3`}>공식 변환 LUT 등록 → /lab/luts</Link>
+          {(asset?.descriptor.profile === "samsunglog" || asset?.descriptor.profile === "dlogm") && (
+            <Link href="/lab/luts" className={`${btn} mt-3`}>공식 변환 LUT 등록(선택) → /lab/luts</Link>
           )}
         </section>
       )}
