@@ -12,7 +12,8 @@ import { filmBadgeLabel } from "@/lib/export/frame";
 import { computeAutoLight } from "@/lib/studio/auto-light";
 import { autoProfile, badgeText, type InputChoice } from "@/lib/studio/input-profile";
 import { initialEditState, selectSim, type EditAction, type SimInfo, type TabId } from "@/lib/studio/state";
-import { historyReducer, initialHistory, redoLabel, undoLabel } from "@/lib/studio/history";
+import { HistoryTimelineSheet } from "./HistoryTimelineSheet";
+import { historyReducer, historyTimeline, initialHistory, redoLabel, undoLabel } from "@/lib/studio/history";
 import { startThumbnails } from "@/lib/studio/thumbs";
 import { buildRenderParams } from "@/lib/studio/uniforms";
 import { simRecipe } from "@/lib/studio/state";
@@ -290,6 +291,15 @@ export default function Studio() {
     toast(`다시 실행: ${redoText}`, { duration: 1800 });
   }, [redoText, historyLocked, toast]);
 
+  const [timelineOpen, setTimelineOpen] = useState(false);
+  const timeline = useMemo(() => historyTimeline(hist), [hist]);
+  const jumpTo = useCallback((index: number) => {
+    if (historyLocked) return;
+    histDispatch({ type: "jump", index });
+    setTimelineOpen(false);
+    toast("해당 시점으로 이동", { duration: 1500 });
+  }, [historyLocked, toast]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
@@ -331,7 +341,9 @@ export default function Studio() {
           hasMedia={asset !== null} busy={loading !== null || exporting}
           p3Available={p3Ok} outSpace={outSpace} onOutSpace={changeOutSpace}
           undoLabel={undoText} redoLabel={redoText} undoDepth={hist.past.length} onUndo={undo} onRedo={redo}
+          timelineAvailable={timeline.length > 1} onTimeline={() => { if (!historyLocked && timeline.length > 1) setTimelineOpen(true); }}
         />
+        <HistoryTimelineSheet open={timelineOpen} entries={timeline} onJump={jumpTo} onClose={() => setTimelineOpen(false)} />
         <div className="studio-body">
           <Preview
             canvasRef={canvasRef} renderer={renderer} asset={asset} hdf={state.hdf} onToggleHdf={() => dispatch({ type: "toggleHdf" })}

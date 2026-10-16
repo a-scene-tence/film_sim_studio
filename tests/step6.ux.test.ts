@@ -1,7 +1,7 @@
 // 모바일 UX: 슬라이더 방향 판별 잠금 + 트랜잭션 기반 Undo/Redo 히스토리.
 import { describe, expect, it, vi } from "vitest";
 import { SliderGesture, valueFromDelta, type PointerLike } from "../src/lib/studio/slider-gesture";
-import { diffLabel, HISTORY_LIMIT, historyReducer, initialHistory, redoLabel, undoLabel, type HistoryAction, type HistoryState } from "../src/lib/studio/history";
+import { diffLabel, HISTORY_LIMIT, historyReducer, historyTimeline, jumpToHistoryIndex, initialHistory, redoLabel, undoLabel, type HistoryAction, type HistoryState } from "../src/lib/studio/history";
 import { initialEditState } from "../src/lib/studio/state";
 
 function rig(value = 0) {
@@ -176,5 +176,88 @@ describe("Undo/Redo 히스토리 (트랜잭션 단위, 최대 50단계)", () => 
     h = run(h, { type: "do", action: { type: "selectSim", simId: "fuji-classic-chrome", iso: null } });
     expect(undoLabel(h)).toBe("필름 변경");
     expect(diffLabel(h.present, h.present)).toBe("변경");
+  });
+});
+
+describe("Smart Clean History: 실질 변화 없는 조작은 기록하지 않는다", () => {
+  const start = () => initialHistory({ edit: initialEditState(), choice: "auto" });
+  const run = (h: HistoryState, ...as: HistoryAction[]) => as.reduce(historyReducer, h);
+  const set = (key: "exposure" | "contrast", value: number): HistoryAction => ({ type: "live", action: { type: "set", key, value } });
+
+  it("0 → 이동 → 0 으로 끝난 드래그는 undoStack 에 쌓이지 않는다", () => {
+    const h = run(start(), { type: "begin" }, set("contrast", 30), set("contrast", -20), set("contrast", 0), { type: "commit" });
+    expect(h.past.length).toBe(0);
+    expect(h.pending).toBeNull();
+  });
+
+  it("0 에서 0 으로의 직접 설정과 -0 은 변화 없음", () => {
+    const h = run(start(), { type: "do", action: { type: "set", key: "exposure", value: 0 } }, { type: "do", action: { type: "set", key: "exposure", value: -0 } });
+    expect(h.past.length).toBe(0);
+  });
+
+  it("0이 아닌 값에서 출발해 같은 값으로 돌아와도 기록하지 않는다", () => {
+    let h = run(start(), { type: "begin" }, set("exposure", 1), { type: "commit" });
+    expect(h.past.length).toBe(1);
+    h = run(h, { type: "begin" }, set("exposure", 2), set("exposure", 1), { type: "commit" });
+    expect(h.past.length).toBe(1);
+  });
+
+  it("동일 필름 재선택·HDF 동일 값 설정은 기록하지 않고 실제 변경만 기록한다", () => {
+    let h = run(start(), { type: "do", action: { type: "selectSim", simId: null, iso: null } }, { type: "do", action: { type: "setHdf", value: false } });
+    expect(h.past.length).toBe(0);
+    h = run(h, { type: "do", action: { type: "selectSim", simId: "fuji-classic-chrome", iso: null } });
+    h = run(h, { type: "do", action: { type: "selectSim", simId: "fuji-classic-chrome", iso: null } });
+    expect(h.past.length).toBe(1);
+  });
+
+  it("드래그 중 단발 조작이 끼어 기준 상태로 돌아오면 기록하지 않는다", () => {
+    const h = run(start(), { type: "begin" }, set("exposure", 1), { type: "do", action: { type: "set", key: "exposure", value: 0 } });
+    expect(h.past.length).toBe(0);
+    expect(h.pending).toBeNull();
+  });
+});
+
+describe("히스토리 타임라인 점프 (jumpToHistoryIndex)", () => {
+  const start = () => initialHistory({ edit: initialEditState(), choice: "auto" });
+  const run = (h: HistoryState, ...as: HistoryAction[]) => as.reduce(historyReducer, h);
+  const commitExposure = (v: number): HistoryAction[] => [{ type: "begin" }, { type: "live", action: { type: "set", key: "exposure", value: v } }, { type: "commit" }];
+  const build = () => run(start(), ...commitExposure(0.5), { type: "do", action: { type: "selectSim", simId: "fuji-classic-chrome", iso: null } }, ...commitExposure(1));
+
+  it("과거 시점으로 점프하면 그 이후가 redo 로 남는다", () => {
+    const h = jumpToHistoryIndex(build(), 1);
+    expect(h.present.edit.exposure).toBe(0.5);
+    expect(h.past.length).toBe(1);
+    expect(h.future.length).toBe(2);
+    expect(run(h, { type: "redo" }).present.edit.simId).toBe("fuji-classic-chrome");
+  });
+
+  it("초기 상태(0)로 점프, 다시 미래 끝으로 점프하면 원래 상태로 복원", () => {
+    const full = build();
+    const first = historyReducer(full, { type: "jump", index: 0 });
+    expect(first.present.edit.exposure).toBe(0);
+    expect(first.past.length).toBe(0);
+    const last = jumpToHistoryIndex(first, 3);
+    expect(last.present).toBe(full.present);
+    expect(last.future.length).toBe(0);
+  });
+
+  it("범위 밖·현재 위치·비정수 인덱스는 동일 참조를 돌려준다", () => {
+    const h = build();
+    for (const i of [-1, 4, h.past.length, 1.5, NaN]) expect(jumpToHistoryIndex(h, i)).toBe(h);
+  });
+
+  it("점프 후 새 조작을 하면 future 가 비워진다", () => {
+    const h = run(jumpToHistoryIndex(build(), 1), ...commitExposure(-1));
+    expect(h.future.length).toBe(0);
+    expect(h.past.length).toBe(2);
+  });
+
+  it("타임라인 목록: 초기 상태·단계 라벨·현재 위치", () => {
+    const t = historyTimeline(jumpToHistoryIndex(build(), 2));
+    expect(t.map((e) => e.kind)).toEqual(["past", "past", "current", "future"]);
+    expect(t[0]!.text).toBe("2단계 전: 초기 상태");
+    expect(t[1]!.text).toBe("1단계 전: 노출");
+    expect(t[2]!.text).toBe("현재: 필름 변경");
+    expect(t[3]!.text).toBe("1단계 후: 노출");
   });
 });
