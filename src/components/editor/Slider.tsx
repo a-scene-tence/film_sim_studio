@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
+import { SliderGesture } from "@/lib/studio/slider-gesture";
 
 export interface SliderProps {
   label: string;
@@ -36,7 +37,7 @@ export function Slider({ label, value, min, max, step, onChange, effective }: Sl
       </span>
       <input
         type="range" min={min} max={max} step={step} value={value} aria-label={label}
-        className="h-11 w-full accent-amber-400"
+        className="h-11 w-full touch-pan-y accent-amber-400"
         onChange={(e) => onChange(Number(e.target.value))}
         onPointerUp={onPointerUp}
       />
@@ -62,66 +63,59 @@ export interface TrackSliderProps {
   trackBackground?: string;
   /** 드래그 시작·끝 알림 (드래그 중 프레임마다 렌더) */
   onDragChange?(dragging: boolean): void;
+  /** 값을 바꾸기 직전 한 번 (히스토리 기준 상태 기억) */
+  onDragStart?(): void;
+  /** 조작 확정(손가락 뗌) 시 드래그 1회당 한 번 */
+  onCommit?(): void;
 }
 
-const DOUBLE_TAP_MS = 300;
-const DOUBLE_TAP_PX = 10;
-
 /**
- * 행 높이 52px. 트랙 4px, 썸 24px, touch-action none. 더블탭(300ms, 10px 미만)은 썸·트랙 모두에서 onReset,
- * min<0 이면 0 위치에서 채움이 시작되고, role="slider" + 방향키(step)를 지원한다.
+ * 행 높이 52px. 트랙 4px, 썸 24px, touch-action pan-y(세로 스크롤 허용).
+ * 터치는 방향 판별 잠금(slider-gesture.ts): 6px 이상 움직여 좌우로 판정될 때만 값이 바뀐다.
+ * 이동 없는 탭 2회(300ms, 10px 미만)는 onReset. min<0 이면 0 위치에서 채움이 시작되고, role="slider" + 방향키(step)를 지원한다.
  */
 export function TrackSlider(p: TrackSliderProps) {
   const track = useRef<HTMLDivElement>(null);
-  const last = useRef<{ t: number; x: number; y: number } | null>(null);
-  const down = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const props = useRef(p);
+  useEffect(() => { props.current = p; });
+  const gestureRef = useRef<SliderGesture | null>(null);
+  useEffect(() => {
+    gestureRef.current = new SliderGesture({
+    limits: () => props.current,
+    value: () => props.current.value,
+    disabled: () => props.current.disabled === true,
+    rect: () => track.current?.getBoundingClientRect() ?? { left: 0, width: 0 },
+    onDragStart: () => { props.current.onDragChange?.(true); props.current.onDragStart?.(); },
+    onChange: (v) => props.current.onChange(v),
+    onCommit: () => { props.current.onDragChange?.(false); props.current.onCommit?.(); },
+    onReset: () => props.current.onReset(),
+    capture: (id) => { try { track.current?.setPointerCapture(id); } catch { /* 이미 끝난 포인터 */ } },
+    release: (id) => { try { track.current?.releasePointerCapture(id); } catch { /* 캡처 없음 */ } },
+    });
+    return () => { gestureRef.current = null; };
+  }, []);
   const span = p.max - p.min;
   const frac = span > 0 ? (Math.min(p.max, Math.max(p.min, p.value)) - p.min) / span : 0;
   const zeroFrac = p.min < 0 ? (0 - p.min) / span : 0;
   const lo = Math.min(frac, zeroFrac), hi = Math.max(frac, zeroFrac);
   const changed = Math.abs(p.value - p.defaultValue) > 1e-9;
 
-  const valueAt = (clientX: number): number => {
-    const r = track.current!.getBoundingClientRect();
-    const f = r.width > 0 ? Math.min(1, Math.max(0, (clientX - r.left) / r.width)) : 0;
-    const raw = p.min + f * span;
-    return Math.min(p.max, Math.max(p.min, Math.round(raw / p.step) * p.step));
-  };
-
   const onDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (p.disabled) return;
-    e.preventDefault();
-    track.current?.setPointerCapture(e.pointerId);
-    down.current = { x: e.clientX, y: e.clientY, moved: false };
-    p.onDragChange?.(true);
-    p.onChange(valueAt(e.clientX));
-  };
-  const onMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    const d = down.current;
-    if (!d) return;
-    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) >= DOUBLE_TAP_PX) d.moved = true;
-    p.onChange(valueAt(e.clientX));
-  };
-  const finish = (e: React.PointerEvent<HTMLDivElement>, cancelled: boolean) => {
-    const d = down.current;
-    if (!d) return;
-    down.current = null;
-    p.onDragChange?.(false);
-    if (cancelled) return;
-    const prev = last.current;
-    const now = { t: e.timeStamp, x: e.clientX, y: e.clientY };
-    if (!d.moved && prev && now.t - prev.t <= DOUBLE_TAP_MS && Math.hypot(now.x - prev.x, now.y - prev.y) < DOUBLE_TAP_PX) {
-      last.current = null;
-      p.onReset();
-    } else last.current = d.moved ? null : now;
+    if (e.pointerType !== "touch") e.preventDefault(); // 마우스: 텍스트 선택 방지 (터치는 스크롤을 막지 않는다)
+    gestureRef.current?.down(e);
   };
   const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (p.disabled) return;
     const k = e.key;
     const dir = k === "ArrowRight" || k === "ArrowUp" ? 1 : k === "ArrowLeft" || k === "ArrowDown" ? -1 : 0;
-    if (dir !== 0) { e.preventDefault(); p.onChange(Math.min(p.max, Math.max(p.min, p.value + dir * p.step))); }
-    else if (k === "Home") p.onChange(p.min);
-    else if (k === "End") p.onChange(p.max);
+    let next: number | null = null;
+    if (dir !== 0) { e.preventDefault(); next = Math.min(p.max, Math.max(p.min, p.value + dir * p.step)); }
+    else if (k === "Home") next = p.min;
+    else if (k === "End") next = p.max;
+    if (next === null) return;
+    p.onDragStart?.();
+    p.onChange(next);
+    p.onCommit?.();
   };
 
   return (
@@ -133,8 +127,8 @@ export function TrackSlider(p: TrackSliderProps) {
       <div
         ref={track} role="slider" tabIndex={p.disabled ? -1 : 0} aria-label={p.label} aria-valuemin={p.min} aria-valuemax={p.max} aria-valuenow={p.value} aria-valuetext={p.display}
         aria-disabled={p.disabled === true}
-        className="relative mt-1 h-6 w-full cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]" style={{ touchAction: "none" }}
-        onPointerDown={onDown} onPointerMove={onMove} onPointerUp={(e) => finish(e, false)} onPointerCancel={(e) => finish(e, true)} onKeyDown={onKey}
+        className="relative mt-1 h-6 w-full cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]" style={{ touchAction: "pan-y" }}
+        onPointerDown={onDown} onPointerMove={(e) => gestureRef.current?.move(e)} onPointerUp={(e) => gestureRef.current?.up(e)} onPointerCancel={(e) => gestureRef.current?.cancel(e)} onKeyDown={onKey}
       >
         <div className="absolute left-0 right-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-[var(--line)]" style={p.trackBackground ? { background: p.trackBackground } : undefined} />
         {p.trackBackground ? null : <div className="absolute top-1/2 h-1 -translate-y-1/2 rounded-full bg-[var(--accent)]" style={{ left: `${lo * 100}%`, width: `${(hi - lo) * 100}%` }} />}

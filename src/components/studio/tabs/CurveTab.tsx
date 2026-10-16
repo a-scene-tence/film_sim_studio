@@ -11,7 +11,7 @@ const PRESETS: ReadonlyArray<[CurvePreset, string]> = [
 ];
 
 export function CurveTab() {
-  const { state, dispatch } = useStudio();
+  const { state, dispatch, live, beginEdit, commitEdit } = useStudio();
   const wrap = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(280);
   useEffect(() => {
@@ -29,7 +29,7 @@ export function CurveTab() {
         ))}
       </div>
       <div style={{ width: w }} className="mx-auto">
-        <ToneCurveGraph value={toCurveState(state.curve)} onChange={(c) => dispatch({ type: "curve", curve: fromCurveState(c) })} />
+        <ToneCurveGraph value={toCurveState(state.curve)} onChange={(c) => live({ type: "curve", curve: fromCurveState(c) })} onDragStart={beginEdit} onCommit={commitEdit} />
       </div>
       {(["zone0", "zone1", "zone2", "zone3", "zone4"] as const).map((k) => <StateSlider key={k} k={k} />)}
       <button type="button" className="min-h-11 self-start px-1 text-[13px] text-[var(--text-2)] underline" onClick={() => dispatch({ type: "curveReset" })}>커브 초기화</button>

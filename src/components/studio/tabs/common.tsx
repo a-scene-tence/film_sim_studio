@@ -5,13 +5,13 @@ import { useStudio } from "../StudioContext";
 
 /** SLIDERS 표(SSOT)에서 라벨·범위·표시·기본값을 읽는 슬라이더 행 */
 export function StateSlider({ k, disabled, track }: { k: SliderKey; disabled?: boolean; track?: string }) {
-  const { state, dispatch, iso } = useStudio();
+  const { state, dispatch, live, beginEdit, commitEdit, iso } = useStudio();
   const sp = SLIDER_BY_KEY[k];
   const v = getValue(state, k);
   return (
     <TrackSlider
       label={sp.label} value={v} min={sp.min} max={sp.max} step={sp.step} display={formatValue(k, v)} defaultValue={defaultFor(k, state.simId, iso)}
-      disabled={disabled} trackBackground={track} onChange={(x) => dispatch({ type: "set", key: k, value: x })} onReset={() => dispatch({ type: "reset", key: k, iso })}
+      disabled={disabled} trackBackground={track} onChange={(x) => live({ type: "set", key: k, value: x })} onDragStart={beginEdit} onCommit={commitEdit} onReset={() => dispatch({ type: "reset", key: k, iso })}
     />
   );
 }

@@ -7,10 +7,11 @@ import { bakeCurve, curvePoints, CURVE_MAX_POINTS, CURVE_MIN_GAP, LINEAR_CURVE, 
  * 섹션 14-6 터치 그래프 (256×256): 빈 곳 탭 = 점 추가(최대 12), 드래그 = 이동,
  * 길게 누르기 500ms = 삭제(끝점 제외), 더블탭 = 선형.
  */
-export function ToneCurveGraph({ value, onChange }: { value: CurveState; onChange(v: CurveState): void }) {
+export function ToneCurveGraph({ value, onChange, onDragStart, onCommit }: { value: CurveState; onChange(v: CurveState): void; onDragStart?(): void; onCommit?(): void }) {
   const svg = useRef<SVGSVGElement>(null);
   const drag = useRef<{ idx: number; moved: boolean; x0: number; y0: number; timer: ReturnType<typeof setTimeout> | null } | null>(null);
   const lastTap = useRef(0);
+  const active = useRef(false);
   const pts = curvePoints(value);
   const path = useMemo(() => {
     const T = bakeCurve(value);
@@ -29,6 +30,7 @@ export function ToneCurveGraph({ value, onChange }: { value: CurveState; onChang
   const onDown = (e: React.PointerEvent<SVGSVGElement>) => {
     e.preventDefault();
     svg.current?.setPointerCapture(e.pointerId);
+    if (!active.current) { active.current = true; onDragStart?.(); }
     const [x, y] = toUnit(e);
     const now = e.timeStamp;
     if (now - lastTap.current < 300) {
@@ -80,6 +82,7 @@ export function ToneCurveGraph({ value, onChange }: { value: CurveState; onChang
     const d = drag.current;
     if (d?.timer) clearTimeout(d.timer);
     drag.current = null;
+    if (active.current) { active.current = false; onCommit?.(); }
   };
 
   return (
