@@ -73,3 +73,47 @@ const ROWS: Array<[keyof ExifSummary, string]> = [
 export function formatSummaryRows(summary: ExifSummary): Array<{ label: string; value: string }> {
   return ROWS.map(([k, label]) => ({ label, value: summary[k] ?? (k === "gps" ? "위치 정보 없음" : "정보 없음") }));
 }
+
+/** Step 4 §7-6 요약 카드용: 이름 키 평탄 태그 (ifd0+exif, 날짜는 Date). 읽을 수 없으면 빈 객체 */
+export async function readExifTags(src: Blob): Promise<Record<string, unknown>> {
+  try {
+    const exifr = (await import("exifr")).default;
+    const opts = {
+      tiff: true, ifd0: true, exif: true, gps: false, interop: false, ifd1: false, makerNote: false, userComment: false, xmp: false, icc: false, iptc: false, jfif: false, ihdr: false,
+      mergeOutput: true, translateKeys: true, translateValues: false, reviveValues: true, sanitize: false, silentErrors: true,
+    };
+    const r = await exifr.parse(src, opts as unknown as Parameters<typeof exifr.parse>[1]);
+    return (r ?? {}) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+export interface OutputExifReport {
+  orientation: number;
+  pixelX: number | null;
+  pixelY: number | null;
+  hasThumbnail: boolean;
+  make: string | null;
+  gps: boolean;
+}
+
+/** Step 4 §10-4(4) 삽입 후 검증: 출력 바이트에서 EXIF 를 다시 파싱한다 (Orientation, PixelXDimension/YDimension, IFD1, GPS) */
+export async function inspectOutputExif(bytes: Uint8Array, format: "jpeg" | "png"): Promise<OutputExifReport> {
+  const payload = await extractPayload(bytes, format);
+  const tiff = payload.tiff;
+  const empty: OutputExifReport = { orientation: payload.orientation, pixelX: null, pixelY: null, hasThumbnail: false, make: null, gps: false };
+  if (!tiff) return empty;
+  const exifr = (await import("exifr")).default;
+  const opts = { tiff: true, ifd0: true, exif: true, gps: true, interop: false, ifd1: true, makerNote: false, xmp: false, icc: false, iptc: false, translateKeys: true, translateValues: false, reviveValues: false, mergeOutput: false, silentErrors: true };
+  const r = ((await exifr.parse(tiff, opts as unknown as Parameters<typeof exifr.parse>[1])) ?? {}) as Record<string, Record<string, unknown> | undefined>;
+  const num = (v: unknown) => (typeof v === "number" ? v : null);
+  const mk = r.ifd0?.Make;
+  return {
+    orientation: payload.orientation,
+    pixelX: num(r.exif?.ExifImageWidth), pixelY: num(r.exif?.ExifImageHeight),
+    hasThumbnail: r.ifd1 !== undefined && Object.keys(r.ifd1).length > 0,
+    make: typeof mk === "string" ? mk.replace(/\0+$/g, "") : null,
+    gps: r.gps !== undefined && Object.keys(r.gps).length > 0,
+  };
+}

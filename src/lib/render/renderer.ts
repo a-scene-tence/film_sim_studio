@@ -85,6 +85,8 @@ export class FilmRenderer {
   private fixedR: Size | null = null;
   private frameViaBitmap = false;
   private histWaiters: Array<(h: HistPixels | null) => void> = [];
+  private suspended = false;
+  private scratch: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null = null;
 
   static create(canvas: HTMLCanvasElement, opts: { preserveDrawingBuffer?: boolean } = {}): FilmRenderer {
     return new FilmRenderer(canvas, opts);
@@ -382,8 +384,13 @@ export class FilmRenderer {
     }
   }
 
-  private refreshSourceLut(): void {
-    void this.refreshSourceLutAsync().then(() => this.scheduleRender());
+  /** 공식 소스 변환 LUT 등록·해제 직후 캐시를 버리고 다시 읽는다 (Step 4 §4-5) */
+  refreshSourceLut(): void {
+    this.sourceLutResolved = "";
+    this.sourceLut = null;
+    this.sourceLutMissing = false;
+    this.lastChainSig = "";
+    void this.refreshSourceLutAsync().then(() => { this.onStatus?.(); this.scheduleRender(); });
   }
 
   private sourceLutResolved = "";
@@ -535,8 +542,31 @@ export class FilmRenderer {
     return JSON.stringify([a?.id, a?.descriptor, this.sourceLut?.cpu.key ?? null, e.adjust.temp, e.adjust.tint, e.adjust.exposure, e.hdf, R]);
   }
 
+  /** Step 4 §10-4(2): 저장 중에는 프리뷰 렌더를 멈춘다 (renderTile 은 그대로 동작) */
+  setSuspended(on: boolean): void {
+    this.suspended = on;
+    if (!on) this.scheduleRender();
+  }
+
+  /** 프리뷰를 한 번 렌더하고 같은 태스크 안에서 RGBA8 로 복사한다 (예상 용량 계산용 프록시 렌더, §10-6) */
+  snapshotPreview(): { width: number; height: number; data: Uint8ClampedArray } {
+    this.renderNow();
+    const w = this.canvas.width, h = this.canvas.height;
+    if (!this.scratch) {
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) throw renderErrors.lost();
+      this.scratch = { canvas, ctx };
+    }
+    this.scratch.canvas.width = w;
+    this.scratch.canvas.height = h;
+    this.scratch.ctx.drawImage(this.canvas, 0, 0);
+    const img = this.scratch.ctx.getImageData(0, 0, w, h);
+    return { width: w, height: h, data: img.data };
+  }
+
   private scheduleRender(): void {
-    if (this.rafPending || this.disposed) return;
+    if (this.rafPending || this.disposed || this.suspended) return;
     if (this.asset?.kind === "video" && this.videoSrc && !this.videoSrc.video.paused) return; // 재생 중엔 표시 프레임이 렌더를 이끈다
     this.rafPending = true;
     requestAnimationFrame(() => {

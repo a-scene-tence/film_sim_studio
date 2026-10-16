@@ -3,13 +3,21 @@
 :root {
   --background: #0b0b0c;
   --foreground: #f2f2f2;
+  --bg: #0b0b0c;
+  --panel: #141416;
+  --panel-2: #1c1c1f;
+  --line: #2a2a2e;
+  --text: #f2f2f2;
+  --text-2: #9a9aa0;
+  --accent: #ff6a1a;
+  --danger: #ff453a;
   color-scheme: dark;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-sans: -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
 
@@ -18,4 +26,73 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans);
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+/* Step 4 스튜디오 (src/components/studio): 문서 스크롤을 없애고 터치 동작을 고정한다. /lab/* 개발 페이지에는 적용하지 않는다. */
+html.studio,
+html.studio body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+button {
+  touch-action: manipulation;
+}
+.studio-sheet {
+  animation: studio-sheet-in 200ms ease-out;
+}
+@keyframes studio-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .studio-sheet {
+    animation: none;
+  }
+}
+.hide-scrollbar {
+  scrollbar-width: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Step 4 §7-3 레이아웃: 세로 기본, 가로 모드(가로 > 세로 이고 높이 < 500px)는 프리뷰 왼쪽 + 오른쪽 360px 열 */
+.studio-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+.studio-side {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+.studio-panel {
+  height: clamp(200px, 34dvh, 320px);
+}
+@media (orientation: landscape) and (max-height: 499px) {
+  .studio-body {
+    flex-direction: row;
+  }
+  .studio-side {
+    width: 360px;
+    min-height: 0;
+  }
+  .studio-panel {
+    height: auto;
+    flex: 1;
+    min-height: 0;
+  }
 }
