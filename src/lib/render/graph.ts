@@ -392,6 +392,17 @@ export class RenderGraph {
     return Y;
   }
 
+  /** WB 스포이트·컬러 자동 보정용: S0 를 WB 항등·uExpGain=1 로 긴 변 `long` px RGBA16F 에 그려 선형 RGBA 를 읽는다 (표시 방향, 위→아래 행) */
+  analysisRgb(c: ChainParams, srcTex: WebGLTexture, srcSize: Size, orient: number, long: number, identityWb: Float32Array): { width: number; height: number; data: Float32Array } {
+    const A = fixedLongSize(c.R, long);
+    const t = this.pool.acquire(A.width, A.height, "rgba16f");
+    const c1: ChainParams = { ...c, R: A, s: { ...c.s, uExpGain: 1 }, norm: { ...c.norm, wb: identityWb } };
+    this.normalize(c1, A, srcTex, srcSize, orient, t);
+    const px = readFloatRGBA(this.gl, t);
+    this.pool.release(t);
+    return { width: A.width, height: A.height, data: px };
+  }
+
   private mainPass(c: ChainParams, out: Target, size: Size, ws: Target, core: Target | null, halo: Target | null, trans: Target | null, toneAB: Target | null, atm: Vec3, tileOrigin: [number, number], imageSize: Size): void {
     const L = c.lut;
     this.draw(this.merge(this.lib(c, core, halo, trans, atm, size, tileOrigin, imageSize), {

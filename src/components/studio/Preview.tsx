@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { MediaAsset } from "@/lib/media-loader";
 import type { FilmRenderer } from "@/lib/render/renderer";
-import { containSize, doubleTapZoom, isDoubleTap, LONG_PRESS_MS, LONG_PRESS_SLOP, pan, pinch, type Geometry, type PinchStart, type Vec2, type ZoomState } from "@/lib/studio/gestures";
+import { containSize, doubleTapZoom, isDoubleTap, LONG_PRESS_MS, LONG_PRESS_SLOP, pan, pinch, pointToImageUV, type Geometry, type PinchStart, type Vec2, type ZoomState } from "@/lib/studio/gestures";
 import { DetailOverlay } from "./DetailOverlay";
 import { HdfToggle } from "./HdfToggle";
 import { Histogram } from "./Histogram";
@@ -32,11 +32,14 @@ export interface PreviewProps {
   editKey: string;
   disabled: boolean;
   pauseVideoSignal: number;
+  /** WB 스포이트 모드: 줌/팬/비교 대신 탭 지점을 onPick(u, v) 로 알린다 (u,v = 표시 이미지 정규화 좌표) */
+  picking?: boolean;
+  onPick?(u: number, v: number): void;
   children?: React.ReactNode;
 }
 
 export function Preview(props: PreviewProps) {
-  const { canvasRef, renderer, asset, hdf, onToggleHdf, compare, onCompare, editKey, disabled, pauseVideoSignal, children } = props;
+  const { canvasRef, renderer, asset, hdf, onToggleHdf, compare, onCompare, editKey, disabled, pauseVideoSignal, picking = false, onPick, children } = props;
   const box = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [zoom, setZoom] = useState<ZoomState>(ONE);
@@ -47,6 +50,7 @@ export function Preview(props: PreviewProps) {
   const pinchStart = useRef<PinchStart | null>(null);
   const single = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const press = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pickStart = useRef<{ id: number; x: number; y: number } | null>(null);
   const comparing = useRef(false);
   const lastTap = useRef<{ time: number; x: number; y: number } | null>(null);
   const labelTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -91,6 +95,7 @@ export function Preview(props: PreviewProps) {
     if ((e.target as HTMLElement).closest("button,input")) return;
     box.current?.setPointerCapture(e.pointerId);
     const pt = rel(e);
+    if (picking) { pickStart.current = { id: e.pointerId, ...pt }; return; }
     ptrs.current.set(e.pointerId, pt);
     if (ptrs.current.size === 1) {
       single.current = { x: pt.x, y: pt.y, moved: false };
@@ -108,6 +113,7 @@ export function Preview(props: PreviewProps) {
   };
 
   const onMove = (e: React.PointerEvent) => {
+    if (picking) return;
     if (!geometry || !ptrs.current.has(e.pointerId)) return;
     const pt = rel(e);
     const prev = ptrs.current.get(e.pointerId)!;
@@ -126,6 +132,17 @@ export function Preview(props: PreviewProps) {
   };
 
   const onUp = (e: React.PointerEvent) => {
+    const ps = pickStart.current;
+    if (ps && ps.id === e.pointerId) {
+      pickStart.current = null;
+      const pt = rel(e);
+      // 탭(이동 8px 미만)이고 취소가 아닐 때만 픽: 이미지 바깥 탭은 무시
+      if (picking && geometry && e.type === "pointerup" && Math.hypot(pt.x - ps.x, pt.y - ps.y) < LONG_PRESS_SLOP) {
+        const uv = pointToImageUV(pt, zoomRef.current, geometry);
+        if (uv) onPick?.(uv.u, uv.v);
+      }
+      return;
+    }
     if (!ptrs.current.has(e.pointerId)) return;
     const wasSingle = ptrs.current.size === 1;
     ptrs.current.delete(e.pointerId);
@@ -155,7 +172,7 @@ export function Preview(props: PreviewProps) {
 
   return (
     <div
-      ref={box} className="relative min-h-[40dvh] flex-1 overflow-hidden bg-black" style={{ touchAction: "none" }}
+      ref={box} className="relative min-h-[40dvh] flex-1 overflow-hidden bg-black" style={{ touchAction: "none", cursor: picking ? "crosshair" : undefined }}
       onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
     >
       <div className="absolute inset-0" style={{ transform: `translate(${zoom.t.x}px, ${zoom.t.y}px) scale(${zoom.z})`, transformOrigin: "50% 50%", willChange: "transform" }}>
@@ -164,6 +181,7 @@ export function Preview(props: PreviewProps) {
       {asset && renderer && geometry ? <DetailOverlay renderer={renderer} asset={asset} zoom={zoom} geometry={geometry} editKey={editKey} /> : null}
       {asset ? <Histogram renderer={renderer} tick={editKey} playing={playing} active={!disabled} key={assetId ?? "none"} /> : null}
       <HdfToggle on={hdf} onToggle={onToggleHdf} disabled={!asset} />
+      {picking ? <div role="status" className="pointer-events-none absolute left-1/2 top-2 z-20 w-[calc(100%-24px)] max-w-[420px] -translate-x-1/2 rounded-[12px] px-3 py-2 text-center text-[12px] leading-snug text-white" style={{ background: "rgba(0,0,0,0.75)", border: "1px solid var(--accent)" }}>사진에서 기준이 될 흰색 또는 회색 영역을 터치하세요 (취소: 스포이트 다시 누르기)</div> : null}
       {compare ? <div className="pointer-events-none absolute left-1/2 top-2 z-10 -translate-x-1/2 rounded-full px-3 py-1 text-[12px] text-white" style={{ background: "rgba(0,0,0,0.6)" }}>원본</div> : null}
       {zoomLabel ? <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full px-3 py-1 text-[12px] text-white" style={{ background: "rgba(0,0,0,0.6)", bottom: isVideo ? 60 : 12 }}>{zoomLabel}</div> : null}
       {isVideo && renderer && asset?.video ? <VideoBar renderer={renderer} fps={asset.video.fps} onPlayingChange={setPlaying} pauseSignal={pauseVideoSignal} /> : null}

@@ -15,11 +15,27 @@ export function hueGradient(): string {
   return `linear-gradient(90deg, ${stops.join(", ")})`;
 }
 
-export function ColorTab() {
-  const { mono } = useStudio();
+export interface ColorTabProps { onAuto(): void; picking: boolean; onTogglePick(): void }
+
+export function ColorTab({ onAuto, picking, onTogglePick }: ColorTabProps) {
+  const { mono, asset, renderer } = useStudio();
+  const ready = !!asset && !!renderer;
   const grad = useMemo(() => hueGradient(), []);
   return (
     <div className="flex flex-col">
+      <button
+        type="button" disabled={!ready} onClick={onAuto}
+        className="mb-1 h-11 w-full rounded-[10px] border border-[var(--accent)] text-[14px] font-semibold text-[var(--accent)] disabled:opacity-40"
+      >
+        컬러 자동 보정
+      </button>
+      <button
+        type="button" disabled={!ready} onClick={onTogglePick} aria-pressed={picking}
+        className="mb-1 h-11 w-full rounded-[10px] border text-[14px] disabled:opacity-40"
+        style={picking ? { background: "var(--accent)", color: "#0b0b0c", borderColor: "var(--accent)", fontWeight: 700 } : { borderColor: "var(--line)", color: "var(--text)" }}
+      >
+        {picking ? "스포이트 (WB 피커) · 사용 중 — 눌러서 취소" : "스포이트 (WB 피커)"}
+      </button>
       <StateSlider k="temp" track="linear-gradient(90deg, #4d8cff, #ffffff, #ffb24d)" />
       <StateSlider k="tint" track="linear-gradient(90deg, #4dff88, #ffffff, #ff4dd2)" />
       <StateSlider k="saturation" />

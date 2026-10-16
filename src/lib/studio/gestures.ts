@@ -65,3 +65,12 @@ export function containSize(Wd: number, Hd: number, Wc: number, Hc: number): { b
   const b = Math.min(Wc / Wd, Hc / Hd);
   return { bw: Wd * b, bh: Hd * b };
 }
+
+/** 컨테이너 좌표 → 표시 이미지 정규화 좌표 (0..1). 이미지 바깥이면 null (§8-2 와 같은 변환: 좌상단 = c + t − (bw·z, bh·z)/2) */
+export function pointToImageUV(pt: Vec2, s: ZoomState, g: Geometry): { u: number; v: number } | null {
+  const iw = g.bw * s.z, ih = g.bh * s.z;
+  if (!(iw > 0) || !(ih > 0)) return null;
+  const u = (pt.x - (g.Wc / 2 + s.t.x - iw / 2)) / iw;
+  const v = (pt.y - (g.Hc / 2 + s.t.y - ih / 2)) / ih;
+  return u >= 0 && u <= 1 && v >= 0 && v <= 1 ? { u, v } : null;
+}
