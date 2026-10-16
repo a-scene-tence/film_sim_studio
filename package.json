@@ -9,14 +9,18 @@
     "predev": "node scripts/vendor-assets.mjs",
     "dev": "next dev",
     "prebuild": "node scripts/vendor-assets.mjs",
-    "build": "next build",
+    "build": "next build && node scripts/build-sw.mjs",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
     "luts": "node scripts/generate-luts.mjs",
     "luts:check": "node scripts/generate-luts.mjs --check",
-    "verify": "npm run lint && npm run test && npm run luts:check && npm run build",
-    "postinstall": "node scripts/vendor-assets.mjs"
+    "verify": "npm run lint && npm run test && npm run luts:check && npm run build && npm run check:export",
+    "postinstall": "node scripts/vendor-assets.mjs",
+    "preview": "node scripts/serve-out.mjs 4173",
+    "gen:demo": "node scripts/generate-demo.mjs",
+    "gen:icons": "node scripts/generate-icons.mjs",
+    "check:export": "node scripts/check-export.mjs"
   },
   "dependencies": {
     "@jsquash/jpeg": "1.6.0",
