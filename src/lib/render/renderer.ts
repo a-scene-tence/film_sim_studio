@@ -1,5 +1,6 @@
 // 섹션 13 렌더러 API — WebGL2 멀티패스 (사진 프록시·원본 타일, 비디오 실시간).
 import { matrixToWS } from "../color/source/primaries.mjs";
+import { resolveInputBinding, type InputBinding } from "./binding";
 import { getFullResolutionTile, type MediaAsset, type SourceDescriptor } from "../media-loader";
 import { displaySizeOf, orientationFromMatrix } from "../media/video-probe";
 import { bakeCurve, curveOn, CURVE_N } from "./curve";
@@ -14,7 +15,7 @@ import type { LutStageRef, NormalizeCtx, PixelCtx } from "./reference";
 import { toneInvTable, TONE_INV_N } from "./tone-inv-table";
 import { probeVideoOrientation, type OrientationProbeResult } from "./video-orientation-probe";
 import { VideoSource, type VideoStats } from "./video-source";
-import { colMajor, IDENTITY3, inv3, wbMatrix, type Mat3 } from "./wb";
+import { colMajor, inv3, wbMatrix, type Mat3 } from "./wb";
 
 export type { RendererCaps } from "./gl";
 
@@ -23,10 +24,6 @@ export interface RenderStats { passes: number; cpuMs: number; R: { width: number
 
 /** 프로브 렌더 덮어쓰기: 공간 단계(HDF, 디헤이즈, 베이스 톤, 명료도, 선명도)를 끄고 그레인 강도를 지정 */
 export interface ProbeOverride { grainAmount: number }
-
-const PROFILE_INDEX: Readonly<Record<string, number>> = {
-  "srgb-image": 0, rec709: 1, hlg: 2, slog3: 3, slog2: 4, flog: 5, flog2: 6, clog3: 7, vlog: 8, nlog: 9, dlog: 10, applelog: 11, "raw-linear": 12,
-};
 
 interface GpuLut { cpu: CpuLut; tex: WebGLTexture; flags?: { inVR: boolean; outVR: boolean; min: Vec3; max: Vec3; domain: number; name: string } }
 
@@ -360,9 +357,9 @@ export class FilmRenderer {
     if (!id) id = (await listStoreLuts()).find((m) => m.role === "source-transform" && m.sourceProfile === want)?.id ?? null;
     const l = id ? await loadStoreLut(id) : null;
     if (!l || l.meta.role !== "source-transform") {
+      // Step 4: LUT 가 없으면 내장 변환 (Samsung Log 공식 수식 / D-Log M 근사)
       this.sourceLut = null;
       this.sourceLutMissing = true;
-      this.warn(renderWarnings.sourceLutRequired);
       return;
     }
     this.sourceLutMissing = false;
@@ -370,29 +367,31 @@ export class FilmRenderer {
   }
 
   // ── 체인 파라미터 ─────────────────────────────────────────────────────────
+  /** Step 4 §4-3: 사용자 공식 LUT 가 로드되어 있으면 profile 13, 없으면 내장 변환 (절대 Rec.709 폴백 없음) */
+  private binding(d: SourceDescriptor): InputBinding {
+    return resolveInputBinding(d, this.sourceLut !== null);
+  }
+
   private profileIndex(d: SourceDescriptor): number {
-    if (d.profile === "pq") throw renderErrors.pq();
-    if (d.profile === "samsunglog" || d.profile === "dlogm") return this.sourceLut ? 13 : 1;
-    const i = PROFILE_INDEX[d.profile];
-    if (i === undefined) throw renderErrors.noSource();
-    return i;
+    return this.binding(d).profile;
   }
 
   private normalizeUniforms(d: SourceDescriptor): { u: NormalizeUniforms; ctx: NormalizeCtx } {
-    const profile = this.profileIndex(d);
-    const srcToWS: Mat3 = profile === 13 ? IDENTITY3 : (matrixToWS(d.primaries) as Mat3);
+    const b = this.binding(d);
+    const profile = b.profile;
+    const srcToWS: Mat3 = b.srcToWS;
     const e = this.effective();
     const wb = wbMatrix(e.adjust.temp, e.adjust.tint);
-    const sl = profile === 13 ? this.sourceLut : null;
+    const sl = b.useSourceLut ? this.sourceLut : null;
     const ctx: NormalizeCtx = {
       profile,
-      limitedCV: profile >= 3 && profile <= 9 && d.range === "limited",
+      limitedCV: b.limitedCV,
       srcToWS,
       rawScale: d.rawScale ?? 1,
       srcLut: sl ? { size: sl.cpu.size, data: sl.cpu.data, inVR: sl.flags?.inVR ?? false, outVR: sl.flags?.outVR ?? false } : null,
-      samsungFix: d.profile === "samsunglog",
+      samsungFix: b.samsungFix,
       rgc: d.primaries !== "srgb",
-      rolloff: profile >= 2 && profile <= 11,
+      rolloff: b.rolloff,
       wb,
       expGain: scalarUniforms(e).uExpGain,
     };
@@ -402,6 +401,11 @@ export class FilmRenderer {
       samsungFix: ctx.samsungFix, rgc: ctx.rgc, rolloff: ctx.rolloff, wb: colMajor(wb),
     };
     return { u, ctx };
+  }
+
+  /** 현재 자산의 입력 바인딩 (배지 문구·approximate 표시용) */
+  inputBinding(): InputBinding | null {
+    return this.asset ? this.binding(this.asset.descriptor) : null;
   }
 
   private probeOverride: ProbeOverride | null = null;
@@ -700,7 +704,7 @@ export class FilmRenderer {
     try { pi = this.asset ? this.profileIndex(this.asset.descriptor) : null; } catch { pi = null; }
     return {
       R, A: sz?.A ?? null, D: sz?.D ?? null, profileIndex: pi, orient: this.srcOrient, srcSize: this.srcSize, atm: this.atm,
-      lutKey: this.lutKey, sourceLutName: this.sourceLut?.flags?.name ?? (this.sourceLutMissing ? "(없음)" : null),
+      lutKey: this.lutKey, sourceLutName: this.sourceLut?.flags?.name ?? (this.sourceLutMissing ? "(내장 변환)" : null),
       orientationProbe: this.orientProbe, chainVersion: this.chainVersion,
     };
   }

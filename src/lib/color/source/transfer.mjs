@@ -50,6 +50,25 @@ export function dlog(y) {
   return y <= 0.14 ? (y - 0.0929) / 6.025 : (Math.pow(10, 3.89616 * y - 2.27752) - 0.0108) / 0.9892;
 }
 
+/** D-Log 인코드 (테스트용, Step 4 §4-2) @param {number} x */
+export function dlogEncode(x) {
+  return x <= 0.0078 ? 6.025 * x + 0.0929 : 0.256663 * Math.log10(0.9892 * x + 0.0108) + 0.584555;
+}
+
+/** Samsung Log 디코드 y=CV/1023 → 장면 선형 x (Samsung Log White Paper 2025, Step 4 §4-1) @param {number} y */
+export function samsunglog(y) {
+  if (y >= 0.206561909) return Math.pow(10, (y - 0.720504856) / 0.258984868) - 0.0003645;
+  if (y >= 0) return 0.016904 - Math.pow(10, (y + 0.24597) / -0.20942);
+  return -0.05;
+}
+
+/** Samsung Log 인코드 x → y (Step 4 §4-1) @param {number} x */
+export function samsunglogEncode(x) {
+  if (x >= 0.01) return 0.258984868 * Math.log10(x + 0.0003645) + 0.720504856;
+  if (x >= -0.05) return -0.20942 * Math.log10(0.016904 - x) - 0.24597;
+  return 0;
+}
+
 const AL = { R0: -0.05641088, Rt: 0.01, sigma: 47.28711236, beta: 0.00964052, gamma: 0.08550479, delta: 0.69336945 };
 const AL_PT = AL.sigma * (AL.Rt - AL.R0) * (AL.Rt - AL.R0);
 

@@ -32,6 +32,7 @@ export function decodeLog(y: number, p: number): number {
     case 10: return T.dlog(y);
     case 11: return T.applelog(y);
     case 2: return T.hlg(y);
+    case 14: return T.samsunglog(y);
     default: return y;
   }
 }

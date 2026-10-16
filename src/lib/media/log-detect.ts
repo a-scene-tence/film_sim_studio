@@ -3,7 +3,7 @@ import type { HistogramStats, LogDetection, SourcePrimaries, SourceProfileId } f
 import { isLogLike } from "./histogram";
 
 /** 11.2 프로파일 표 (vBlack = 반사율 0 의 Full 확장 신호값, 기본 원색) — 표 순서가 동률 정렬 순서 */
-export const PROFILE_TABLE: ReadonlyArray<{ id: SourceProfileId; vBlack: number | null; primaries: SourcePrimaries }> = [
+export const PROFILE_TABLE: ReadonlyArray<{ id: SourceProfileId; vBlack: number | null; primaries: SourcePrimaries; vGrey?: number }> = [
   { id: "slog3", vBlack: 0.0354, primaries: "s-gamut3-cine" },
   { id: "slog2", vBlack: 0.03, primaries: "s-gamut3" },
   { id: "flog", vBlack: 0.0354, primaries: "rec2020" },
@@ -14,14 +14,19 @@ export const PROFILE_TABLE: ReadonlyArray<{ id: SourceProfileId; vBlack: number 
   { id: "dlog", vBlack: 0.0929, primaries: "d-gamut" },
   { id: "applelog", vBlack: 0.1505, primaries: "rec2020" },
   { id: "hlg", vBlack: null, primaries: "rec2020" },
-  { id: "samsunglog", vBlack: null, primaries: "rec2020" },
+  { id: "samsunglog", vBlack: 0.0731, vGrey: 0.5434, primaries: "rec2020" },
   { id: "dlogm", vBlack: null, primaries: "rec2020" },
 ];
 
 export function defaultPrimaries(p: SourceProfileId): SourcePrimaries {
   return PROFILE_TABLE.find((x) => x.id === p)?.primaries ?? "srgb";
 }
-export const requiresSourceLut = (p: SourceProfileId) => p === "samsunglog" || p === "dlogm";
+/** Step 4: Samsung Log 는 내장 공식 변환, D-Log M 은 내장 근사 변환이 기본 바인딩이므로 LUT 가 필수인 프로파일은 없다 */
+export const requiresSourceLut = (): boolean => false;
+/** 사용자가 공식 LUT 를 등록할 수 있는 프로파일 (등록하면 내장 변환보다 우선) */
+export const hasOfficialLutSlot = (p: SourceProfileId): boolean => p === "samsunglog" || p === "dlogm";
+/** DJI D-Log M 은 공개 수식이 없어 D-Log 곡선 + D-Gamut 근사를 쓴다 */
+export const isApproximate = (p: SourceProfileId): boolean => p === "dlogm";
 
 export interface LogDetectInput {
   colour: { primaries: number | null; transfer: number | null; matrix: number | null; fullRange: boolean | null };
@@ -40,7 +45,7 @@ const FILE_TOKENS: SourceProfileId[] = ["slog3", "slog2", "applelog", "flog2", "
 const MAKERS: Array<[string, SourceProfileId]> = [["samsung", "samsunglog"], ["apple", "applelog"], ["dji", "dlogm"], ["sony", "slog3"], ["fujifilm", "flog2"], ["canon", "clog3"], ["panasonic", "vlog"], ["nikon", "nlog"]];
 
 function mk(profile: SourceProfileId, confidence: LogDetection["confidence"], autoApply: boolean, evidence: string[], candidates: SourceProfileId[] = [], primaries?: SourcePrimaries): LogDetection {
-  return { profile, primaries: primaries ?? defaultPrimaries(profile), confidence, autoApply, candidates, evidence, requiresSourceLut: requiresSourceLut(profile) };
+  return { profile, primaries: primaries ?? defaultPrimaries(profile), confidence, autoApply, candidates, evidence, requiresSourceLut: requiresSourceLut(), approximate: isApproximate(profile) };
 }
 
 /** 11.2 감지 파이프라인: 위에서부터 처음 확정된 단계를 쓴다. */

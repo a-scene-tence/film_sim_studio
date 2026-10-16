@@ -9,7 +9,7 @@ import { warnings as W, errors, toErrorInfo } from "../lib/media/errors";
 import { buildHeicPrimaries } from "../lib/media/heic-primaries";
 import { decodePng16, decodeToRgba8, imageDescriptor, proxyFromRgba8, supportsP3Canvas } from "../lib/media/image-decode";
 import { readSof, stripApp1 } from "../lib/media/jpeg";
-import { defaultPrimaries, detectLog, requiresSourceLut } from "../lib/media/log-detect";
+import { defaultPrimaries, detectLog, hasOfficialLutSlot } from "../lib/media/log-detect";
 import { displayRectToSource, flipToOrientation, orientedSize, outputToSource } from "../lib/media/orientation";
 import { isExifChunk, pngHeader, stripPngChunks } from "../lib/media/png-chunks";
 import { computeKRaw, decodeRaw, type RawDecodeResult, type RawPixels } from "../lib/media/raw-decode";
@@ -267,7 +267,7 @@ function rawProxy(p: RawPixels, orientation: number): PixelBufferF32 {
 
 // 비디오 ───────────────────────────────────────────────────────────────────
 async function sourceLutFor(profile: SourceProfileId): Promise<{ size: number; data: Float32Array } | null> {
-  if (!requiresSourceLut(profile)) return null;
+  if (!hasOfficialLutSlot(profile)) return null;
   const want = profile === "samsunglog" ? "samsung-log" : "dji-dlog-m";
   try {
     const m = (await listLuts()).find((l) => l.role === "source-transform" && l.sourceProfile === want);
@@ -297,7 +297,6 @@ async function loadVideo(id: number, file: File, format: SourceFormat, base: Bas
   progress(id, "analyze", "Log 감지");
   const detection = detectLog({ colour: info.colour, fileName: file.name, metaText: probe.metaText, make: info.make, histogram: frame.stats });
   const warnings: string[] = [W.videoThumbnailApprox];
-  if (detection.requiresSourceLut && !(await sourceLutFor(detection.profile))) warnings.push(W.sourceLutRequired);
   const applied = detection.autoApply ? detection.profile : "rec709";
   const descriptor: SourceDescriptor = {
     profile: applied, primaries: applied === "rec709" ? "srgb" : detection.autoApply ? detection.primaries : "srgb",
@@ -317,7 +316,6 @@ async function setProfile(id: number, assetId: string, profile: SourceProfileId,
   const prim: SourcePrimaries = primaries ?? (profile === "rec709" || profile === "srgb-image" ? (a.kind === "image" ? a.descriptor.primaries : "srgb") : defaultPrimaries(profile));
   a.descriptor = { ...a.descriptor, profile, primaries: prim };
   const warnings = a.warnings.filter((w) => w !== W.sourceLutRequired);
-  if (requiresSourceLut(profile) && !(await sourceLutFor(profile))) warnings.push(W.sourceLutRequired);
   a.warnings = warnings;
   post({ id, type: "profile-result", descriptor: a.descriptor, detection: a.detection, warnings });
 }

@@ -1,9 +1,9 @@
-// docs/RENDERER.md 섹션 6 fs_normalize.glsl — 글자 그대로 옮긴 정본. 수정 금지.
+// docs/RENDERER.md 섹션 6 fs_normalize.glsl — 정본. Step 4 §5-1 패치(uProfile 14 samsunglog)만 허용.
 export const FS_NORMALIZE_GLSL = `// ===== fs_normalize : S0 source -> WS (+WB, exposure) =====
 uniform sampler2D uSrc;
 uniform vec2 uSrcSize;      // stored texture size
 uniform int uOrient;        // residual orientation 1..8
-uniform int uProfile;       // 0 srgb-image,1 rec709,2 hlg,3 slog3,4 slog2,5 flog,6 flog2,7 clog3,8 vlog,9 nlog,10 dlog,11 applelog,12 raw-linear,13 source-lut
+uniform int uProfile;       // 0 srgb-image,1 rec709,2 hlg,3 slog3,4 slog2,5 flog,6 flog2,7 clog3,8 vlog,9 nlog,10 dlog,11 applelog,12 raw-linear,13 source-lut,14 samsunglog
 uniform bool uLimitedCV;
 uniform mat3 uSrcToWS;
 uniform float uRawScale;
@@ -38,6 +38,11 @@ float decodeLog(float y, int p) {
     if (y >= Pt) return exp2((y - 0.69336945) / 0.08550479) - 0.00964052;
     if (y >= 0.0) return sqrt(y / 47.28711236) - 0.05641088;
     return -0.05641088;
+  }
+  if (p == 14) {
+    if (y >= 0.206561909) return pow(10.0, (y - 0.720504856) / 0.258984868) - 0.0003645;
+    if (y >= 0.0) return 0.016904 - pow(10.0, (y + 0.24597) / -0.20942);
+    return -0.05;
   }
   if (p == 2) { float E = y <= 0.5 ? y * y / 3.0 : (exp((y - 0.55991073) / 0.17883277) + 0.28466892) / 12.0; return E * (0.18 / 0.0481333333); }
   return y;
