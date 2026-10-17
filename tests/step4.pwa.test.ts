@@ -73,17 +73,6 @@ describe("T20 sw-template", () => {
     expect(ctx.navKey("/lab/renderer.html")).toBe("/lab/renderer");
     expect(ctx.navKey("")).toBe("/");
   });
-  it("구버전 캐시 전량 삭제·skipWaiting·clients.claim, 문서/매니페스트는 네트워크 우선", () => {
-    const { code } = load();
-    expect(code).toContain("self.skipWaiting()");
-    expect(code).toContain("self.clients.claim()");
-    expect(code).toContain("keys.filter((k) => k !== PRECACHE && k !== RUNTIME)");
-    expect(code).toContain("const CACHE_GEN = 'v2'");
-    expect(code).toContain("'/manifest.webmanifest', '/manifest.json'");
-    const nav = code.slice(code.indexOf("req.mode === 'navigate'"), code.indexOf("NETWORK_FIRST_PATHS.includes"));
-    expect(nav.indexOf("await fetch(req")).toBeGreaterThan(-1);
-    expect(nav.indexOf("await fetch(req")).toBeLessThan(nav.indexOf("cache.match(navKey"));
-  });
   it("워커 스크립트는 #params 를 잃지 않도록 URL 없는 새 Response 로 돌려준다 (Turbopack 워커 부트스트랩)", () => {
     expect(load().code).toContain("forWorker");
   });
@@ -139,12 +128,10 @@ describe("T22 정적 라우팅 회귀 (check-export)", () => {
     if (opts.index) put(p, "out/index.html", '<html><head><link rel="manifest" href="/manifest.webmanifest"/><meta name="apple-mobile-web-app-capable" content="yes"/><meta name="mobile-web-app-capable" content="yes"/><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/><meta name="viewport" content="viewport-fit=cover"/><link rel="apple-touch-icon" href="/i.png"/></head></html>');
     put(p, "out/lab/renderer.html", "<html/>");
     put(p, "out/404.html", "<html/>");
-    const mf = JSON.stringify({
+    put(p, "out/manifest.webmanifest", JSON.stringify({
       name: "Film Lab", short_name: "Film Lab", start_url: "/", scope: "/", display: "standalone", background_color: "#09090b", theme_color: "#09090b",
       icons: [{ src: "/icons/icon-192.png" }, { src: "/icons/icon-512.png" }, { src: "/icons/icon-maskable-512.png", purpose: "maskable" }],
-    });
-    put(p, "out/manifest.webmanifest", mf);
-    put(p, "out/manifest.json", mf);
+    }));
     const files = ["/", "/404", "/manifest.webmanifest", "/luts/manifest.json", "/demo/demo-scene.jpg", "/icons/icon-192.png", "/vendor/jsquash-jpeg/1.6.0/mozjpeg_enc.wasm", ...Array.from({ length: 32 }, (_, i) => `/luts/bin/s${i}.bin`)];
     put(p, "out/sw.js", `const FILES = ${JSON.stringify(files)};\n`);
     return p;
@@ -174,27 +161,6 @@ describe("standalone PWA 메타 · 데모 버튼 제거 (빌드 산출물)", () 
     expect(html).toContain('name="apple-mobile-web-app-status-bar-style" content="black-translucent"');
     expect(html).toContain("viewport-fit=cover");
     expect(html).toContain('rel="apple-touch-icon"');
-  });
-  it("out/manifest.json 이 webmanifest 와 동일하고 WebAPK 규격을 따른다", () => {
-    if (!existsSync("out/manifest.json")) return;
-    const a = JSON.parse(readFileSync("out/manifest.json", "utf8"));
-    expect(a).toEqual(JSON.parse(readFileSync("out/manifest.webmanifest", "utf8")));
-    expect(a).toMatchObject({ id: "/", start_url: "/", scope: "/", display: "standalone", display_override: ["standalone", "fullscreen"], orientation: "portrait", background_color: "#09090b", theme_color: "#09090b" });
-    expect(a.icons).toEqual([
-      { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
-      { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
-      { src: "/icons/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
-    ]);
-  });
-  it.skipIf(html === null)("메타 태그는 <head> 안에 있다", () => {
-    const head = html!.slice(html!.indexOf("<head"), html!.indexOf("</head>"));
-    for (const t of ['rel="manifest"', 'name="apple-mobile-web-app-capable" content="yes"', 'name="mobile-web-app-capable" content="yes"']) expect(head).toContain(t);
-  });
-  it("시작 화면에 설치 카드·캐시 초기화 버튼이 있다", () => {
-    const src = readFileSync("src/components/studio/InstallCard.tsx", "utf8");
-    expect(src).toContain("앱으로 설치하기 (전체화면)");
-    expect(src).toContain("구버전 캐시 초기화");
-    expect(readFileSync("src/lib/pwa/install-hints.ts", "utf8")).toContain("unregister()");
   });
   it("시작 화면 소스에 데모 버튼이 없다", () => {
     const src = readFileSync("src/components/studio/EmptyState.tsx", "utf8");

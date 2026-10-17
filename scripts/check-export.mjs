@@ -14,7 +14,7 @@ for (const f of walk(APP, APP, [])) {
   must(segs.length ? segs.join('/') + '.html' : 'index.html');
 }
 // 2) 고정 산출물
-for (const rel of ['404.html', 'manifest.webmanifest', 'manifest.json', 'sw.js', 'luts/manifest.json', 'demo/demo-scene.jpg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png', 'vendor/jsquash-jpeg/1.6.0/mozjpeg_enc.wasm']) must(rel);
+for (const rel of ['404.html', 'manifest.webmanifest', 'sw.js', 'luts/manifest.json', 'demo/demo-scene.jpg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png', 'vendor/jsquash-jpeg/1.6.0/mozjpeg_enc.wasm']) must(rel);
 // 3) public/ 전체가 out/ 에 복사되었는지
 for (const rel of walk(PUB, PUB, [])) { if (rel.endsWith('.DS_Store')) continue; must(rel); }
 // 4) LUT 바이너리 32개
@@ -35,12 +35,6 @@ if (exists('manifest.webmanifest')) {
   const icons = Array.isArray(m.icons) ? m.icons : [];
   for (const src of ['/icons/icon-192.png', '/icons/icon-512.png', '/icons/icon-maskable-512.png']) if (!icons.some((i) => i.src === src)) errors.push('manifest icon missing: ' + src);
   if (!icons.some((i) => i.purpose === 'maskable')) errors.push('manifest has no maskable icon');
-}
-// 6a) manifest.json 은 webmanifest 와 동일 내용
-if (exists('manifest.json') && exists('manifest.webmanifest')) {
-  const a = JSON.parse(fs.readFileSync(path.join(OUT, 'manifest.json'), 'utf8'));
-  const b = JSON.parse(fs.readFileSync(path.join(OUT, 'manifest.webmanifest'), 'utf8'));
-  if (JSON.stringify(a) !== JSON.stringify(b)) errors.push('manifest.json differs from manifest.webmanifest');
 }
 // 6b) standalone PWA 메타 태그 (index.html)
 if (exists('index.html')) {

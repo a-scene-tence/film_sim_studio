@@ -37,22 +37,3 @@ export function nextInstallHint(deferred: BeforeInstallPromptEvent | null): { te
   }
   return null;
 }
-
-export const IOS_MANUAL_INSTALL_TEXT = "Safari 하단 공유 버튼[↑] → '홈 화면에 추가'를 누르면 주소창 없는 전체화면 앱으로 설치됩니다.";
-export const OTHER_MANUAL_INSTALL_TEXT = "브라우저 메뉴(⋮) → '앱 설치' 또는 '홈 화면에 추가'를 선택하면 전체화면 앱으로 설치됩니다. 메뉴에 '앱 설치'가 없으면 아래 캐시 초기화 후 다시 시도하세요.";
-
-/** 등록된 모든 Service Worker 해제 + 모든 캐시 삭제 후 새로고침 */
-export async function resetAppCaches(): Promise<void> {
-  try {
-    if ("serviceWorker" in navigator) {
-      const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map((r) => r.unregister()));
-    }
-    if ("caches" in window) {
-      const keys = await caches.keys();
-      await Promise.all(keys.map((k) => caches.delete(k)));
-    }
-  } finally {
-    window.location.reload();
-  }
-}
