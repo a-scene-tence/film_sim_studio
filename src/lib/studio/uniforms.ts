@@ -33,6 +33,9 @@ export function buildRenderParams(st: EditState, o: BuildOptions = {}): RenderPa
     monoHue: st.monoHue,
     monoAmount: st.monoAmount,
     dRange: st.dRange,
+    skinHue: st.skinHue,
+    skinSat: st.skinSat,
+    skinLum: st.skinLum,
     absolute: true,
   };
 }

@@ -8,6 +8,7 @@ import { tetraSample } from "../color/fse/tetra.mjs";
 import * as T from "../color/source/transfer.mjs";
 import { sampleCurve } from "./curve";
 import { GRAIN_CLUSTER_MIX, GRAIN_CLUSTER_STD, GRAIN_FINE_STD, GRAIN_FLOOR, GRAIN_GAIN, GRAIN_TRI_NORM, GRAIN_W_CENTER, GRAIN_W_NEIGHBOR } from "./grain";
+import { skinApply, skinMask, skinOn } from "./skin";
 import { drShoulder, edgeSoftenL, filmShoulder, hdOp, rolloffW, zoneShadowPop } from "./isp-ops";
 import { apply3, type Mat3 } from "./wb";
 
@@ -278,12 +279,19 @@ export function cceOp(v: ArrayLike<number>, ke: number, kb: number): Vec3 {
 /** 섹션 5.12 채널별 커브 */
 export const applyCurve = (v: ArrayLike<number>, T: ArrayLike<number>): Vec3 => map3(v, (x) => sampleCurve(T, x));
 
-/** fs_post 의 채도·생동감·명료도 (명료도 ab = 가이드 필터 계수, null 이면 명료도 생략) */
-export function postChroma(v: ArrayLike<number>, sat: number, vib: number, clarity: number, clarAB: [number, number] | null, monoTint: [number, number] | null = null): Vec3 {
+/**
+ * fs_post 의 흑백 조색·피부톤·채도·생동감·명료도 (명료도 ab = 가이드 필터 계수, null 이면 명료도 생략).
+ * skinK = uSkin (skinHue, skinSat, skinLum)/100 — 흑백 필름이면 effectiveParams 가 0 으로 둔다. 모두 0 이면 건너뛴다.
+ */
+export function postChroma(
+  v: ArrayLike<number>, sat: number, vib: number, clarity: number, clarAB: [number, number] | null, monoTint: [number, number] | null = null,
+  skinK: ArrayLike<number> | null = null,
+): Vec3 {
   const tint = monoTint !== null && (monoTint[0] !== 0 || monoTint[1] !== 0);
+  const sk = skinOn(skinK);
   const chroma = sat !== 0 || vib !== 0;
   const clar = clarity !== 0 && clarAB !== null;
-  if (!tint && !chroma && !clar) return [v[0]!, v[1]!, v[2]!];
+  if (!tint && !sk && !chroma && !clar) return [v[0]!, v[1]!, v[2]!];
   let [L, a, b] = toLab(v);
   if (tint) {
     // Step 4 §5-4 흑백 조색: lab.yz += uMonoTint · sstep(0,0.25,L) · (1 − sstep(0.85,1,L))
@@ -291,6 +299,11 @@ export function postChroma(v: ArrayLike<number>, sat: number, vib: number, clari
     a += monoTint![0] * w;
     b += monoTint![1] * w;
   }
+  // STC-v1 §8.8b 피부톤: 3D 마스크(색상 × 채도 × 명도)는 이 단계 입력(조색 후 lab, 표시 인코딩 v)으로 한 번만 계산
+  const wS = sk ? skinMask(L, a, b, v) : 0;
+  if (wS > 0) [L, a, b] = skinApply(L, a, b, wS, skinK!);
+  // 피부톤만 켜진 경우: 마스크 밖(wS = 0) 픽셀은 입력 그대로, 피부 픽셀은 clamp 로만 복귀 (gamutMap 압축이 피부 밖 고채도색을 건드리지 않게)
+  if (!tint && !chroma && !clar) return wS > 0 ? map3(oklabToLin(L, a, b), (q) => srgbEnc(clamp01(q))) : [v[0]!, v[1]!, v[2]!];
   if (chroma) {
     const C = Math.hypot(a, b);
     const h = Math.atan2(b, a) / DEG;
@@ -397,6 +410,8 @@ export interface PixelCtx {
   /** Step 4: 필름 강도 0..1 (기본 1), 흑백 조색 uMonoTint (mono 일 때만 적용) */
   filmStrength?: number;
   monoTint?: [number, number];
+  /** STC-v1 피부톤 uSkin (skinHue, skinSat, skinLum)/100 (생략 = 꺼짐) */
+  skin?: [number, number, number];
   /** FSE-v2 카메라 ISP 픽셀 단계: S6b 필름 숄더(drStops, sceneRef), S7b 하이라이트 밀도(hd). 공간 단계(MH, ZS·팝, ES)는 프로브에서 꺼진다 */
   isp?: { drStops: number; sceneRef: boolean; hd: number; /** 표시 기준 소스의 D레인지 숄더 (생략 = 꺼짐) */ drY0?: number; drS?: number };
 }
@@ -418,7 +433,7 @@ export function pixelPipelineFromWs(x0: ArrayLike<number>, u: number, vv: number
   if (c.isp && c.isp.hd > 0) o = hdOp(o, c.isp.hd, gamutMap16);
   if (!c.mono && (c.ke > 0 || c.kb > 0)) o = cceOp(o, c.ke, c.kb);
   if (c.curve) o = applyCurve(o, c.curve);
-  o = postChroma(o, c.sat, c.vib, 0, null, c.mono ? (c.monoTint ?? null) : null);
+  o = postChroma(o, c.sat, c.vib, 0, null, c.mono ? (c.monoTint ?? null) : null, c.mono ? null : (c.skin ?? null));
   if (c.grain && c.grain.amount > 0) o = grainApply(o, c.grain.amount, grainNoise(pxX, pxY, c.grain.scale, c.grain.off, c.grain.coarse ?? 0));
   return o;
 }

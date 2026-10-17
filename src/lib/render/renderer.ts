@@ -655,6 +655,26 @@ export class FilmRenderer {
     });
   }
 
+  /**
+   * STC-v1 피부톤 자동 보정: 현재 필름·WB·모든 보정을 적용하되 피부톤 3값만 0 으로 둔 최종 출력(긴 변 256 RGBA8, 표시 인코딩).
+   * 같은 태스크 안에서 한 번 그린 뒤 파라미터를 되돌리고 다음 프레임에 실제 파라미터로 다시 그린다 (화면에는 보이지 않는다).
+   */
+  readOutputWithoutSkin(): HistPixels {
+    if (!this.asset || !this.srcTex || !this.srcSize) throw renderErrors.noSource();
+    if (this.asset.kind === "video") this.uploadVideoFrame();
+    const saved = this.params;
+    this.params = { ...saved, skinHue: 0, skinSat: 0, skinLum: 0 };
+    try {
+      const r = this.renderNowInner(true);
+      if (!r.hist) throw renderErrors.noSource();
+      return r.hist;
+    } finally {
+      this.params = saved;
+      this.lastChainSig = "";
+      this.scheduleRender();
+    }
+  }
+
   /** Step 4 §9-1: S0(uExpGain=1) 긴 변 256 의 휘도 배열. 비디오는 현재 표시 프레임 */
   readAnalysisLuma(): Float32Array {
     if (!this.asset || !this.srcTex || !this.srcSize) throw renderErrors.noSource();
@@ -855,7 +875,7 @@ export class FilmRenderer {
         norm: this.normalizeUniforms(this.asset.descriptor).ctx,
         ct: s.uCt, vig: s.uVig, aspect: R.width / R.height, lut, mono: e.mono, ke: s.uKe, kb: s.uKb,
         curve: curveOn(this.params.curve) ? this.curveTable : null,
-        sat: s.uSat, vib: s.uVib, filmStrength: s.uFilmStrength, monoTint: s.uMonoTint,
+        sat: s.uSat, vib: s.uVib, filmStrength: s.uFilmStrength, monoTint: s.uMonoTint, skin: s.uSkin,
         isp: (() => { const q = this.ispFor(1); return { drStops: q.uDrStops, sceneRef: q.uSceneRef, hd: q.uIspHd, drY0: q.uDrY0, drS: q.uDrS }; })(),
         grain: s.uGrainAmt > 0 ? { amount: s.uGrainAmt, scale: grainScalePreview(this.outShort(), Math.min(R.width, R.height)), off: grainOffset(0), coarse: grainCoarse(e.adjust.grainSize) } : null,
       };

@@ -296,6 +296,13 @@ export default function RendererLab() {
         {ADJUST_SLIDERS.map((s) => <Slider key={s.key} label={s.label} min={s.min} max={s.max} step={s.step} value={params.adjust[s.key]} effective={eff.adjust[s.key]} onChange={(v) => setAdjust(s.key, v)} />)}
       </section>
 
+      <section className={`${card} flex flex-col gap-1`}>
+        <h2 className="mb-2 font-medium">피부톤 (STC-v1)</h2>
+        {([["skinHue", "피부 색조"], ["skinSat", "피부 혈색 (채도)"], ["skinLum", "피부 투명도 (밝기)"]] as const).map(([k, label]) => (
+          <Slider key={k} label={label} min={-100} max={100} step={1} value={params[k] ?? 0} onChange={(v) => apply({ ...params, [k]: v })} />
+        ))}
+      </section>
+
       <section className={`${card} flex flex-col gap-3`}>
         <h2 className="font-medium">톤 커브</h2>
         <div className="flex gap-2 overflow-x-auto pb-1">

@@ -1,13 +1,17 @@
-// docs/RENDERER.md 섹션 6 fs_post.glsl — 정본. Step 4 §5-4 패치(uMonoTint), OPT-v1 패치(H–K 광학 농도, 명료도 할로 억제, COLOR_SCIENCE §8.8·§8.9)만 허용.
-export const FS_POST_GLSL = `// ===== fs_post : S8~S11 (color chrome, tone curve, saturation/vibrance, clarity) =====
+// docs/RENDERER.md 섹션 6 fs_post.glsl — 정본. Step 4 §5-4 패치(uMonoTint), OPT-v1 패치(H–K 광학 농도, 명료도 할로 억제, COLOR_SCIENCE §8.8·§8.9),
+// STC-v1 패치(피부톤 세부 조정 uSkin, COLOR_SCIENCE §8.8b — 함수 본문은 skin.ts 의 SKIN_GLSL)만 허용.
+import { SKIN_GLSL } from "../skin";
+
+export const FS_POST_GLSL = `// ===== fs_post : S8~S11 (color chrome, tone curve, skin tone, saturation/vibrance, clarity) =====
 uniform sampler2D uMainTex;
 uniform float uSat;          // -100..100
 uniform float uVib;          // -100..100
 uniform float uClarity;      // -100..100
 uniform sampler2D uClarAB;   // RG (mean_a, mean_b), global uv
 uniform vec2 uMonoTint;      // mono toning: C_t * (cos h, sin h), applied only when uMono
+uniform vec3 uSkin;          // skin tone (hue, sat, lum) each -1..1, all 0 = bypass
 out vec4 outColor;
-void main() {
+${SKIN_GLSL}void main() {
   vec2 uvG = uvGlobal();
   vec3 v = texelFetch(uMainTex, ivec2(gl_FragCoord.xy), 0).rgb;
   if (!uMono && (uKe > 0.0 || uKb > 0.0)) v = cceOp(v);
@@ -15,9 +19,12 @@ void main() {
   bool tint = uMono && (uMonoTint.x != 0.0 || uMonoTint.y != 0.0);
   bool chroma = (uSat != 0.0 || uVib != 0.0);
   bool clar = (uClarity != 0.0);
-  if (tint || chroma || clar) {
+  bool skin = !uMono && (uSkin.x != 0.0 || uSkin.y != 0.0 || uSkin.z != 0.0);
+  if (tint || skin || chroma || clar) {
     vec3 lab = linToOklab(srgbDec(v));
     if (tint) lab.yz += uMonoTint * sstep(0.0, 0.25, lab.x) * (1.0 - sstep(0.85, 1.0, lab.x));
+    float wS = skin ? skinMask(lab, v) : 0.0;
+    if (wS > 0.0) lab = skinApply(lab, wS, uSkin);
     if (chroma) {
       float C = length(lab.yz);
       float h = atan(lab.z, lab.y) / DEG;
@@ -34,7 +41,8 @@ void main() {
       float base = ab.x * lab.x + ab.y;
       lab.x = lab.x + 1.2 * (uClarity / 100.0) * 0.08 * tanh(clamp((lab.x - base) / 0.08, -15.0, 15.0)) * 4.0 * lab.x * (1.0 - lab.x) * sstep(0.02, 0.16, lab.x) * (1.0 - 0.5 * sstep(0.85, 1.0, lab.x));
     }
-    v = srgbEnc(gamutMap(lab));
+    if (tint || chroma || clar) v = srgbEnc(gamutMap(lab));
+    else if (wS > 0.0) v = srgbEnc(clamp(oklabToLin(lab), 0.0, 1.0));
   }
   outColor = vec4(v, linToOklab(srgbDec(v)).x);
 }
