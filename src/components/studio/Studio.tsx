@@ -13,7 +13,7 @@ import { AUTO_LIGHT_LABEL, computeAutoLightMode, type AutoLightMode } from "@/li
 import { autoProfile, badgeText, type InputChoice } from "@/lib/studio/input-profile";
 import { editReducer, initialEditState, isEditDefault, isTabDefault, mediaOpenState, RESET_ALL_LABEL, TAB_RESET_LABEL, type EditAction, type SimInfo, type TabId } from "@/lib/studio/state";
 import { AboutSheet } from "./AboutSheet";
-import { computeAutoChroma, computeAutoWb, solveEyedropperOutput } from "@/lib/studio/color-auto";
+import { computeAutoChroma, computeAutoWb, solveEyedropperSample } from "@/lib/studio/color-auto";
 import { HistoryTimelineSheet } from "./HistoryTimelineSheet";
 import { historyReducer, historyTimeline, initialHistory, redoLabel, undoLabel } from "@/lib/studio/history";
 import { startThumbnails } from "@/lib/studio/thumbs";
@@ -317,12 +317,13 @@ export default function Studio() {
     if (!renderer || !asset) return;
     try {
       // 표본은 WB 적용 전(Pre-WB) 5×5 평균, 판정은 현재 필름·파라미터를 통과한 최종 출력 기준
-      const r = solveEyedropperOutput(renderer.readAnalysisRgb(1024), u, v, (sample) => renderer.wbOutputEval(sample, u, v));
+      // CPU 프록시 표본 + CPU 참조 파이프라인으로만 풀이한다 (GPU 재렌더 없음). 상태 갱신은 아래 histDispatch 한 번뿐
+      const r = solveEyedropperSample(renderer.sampleWsPatch(u, v), (sample) => renderer.wbOutputEval(sample, u, v));
       setPicking(false);
       setPickMarker({ u, v, key: Date.now() });
       if (pickTimer.current) clearTimeout(pickTimer.current);
       pickTimer.current = setTimeout(() => setPickMarker(null), 1600);
-      if (!r) { toast("선택한 지점이 너무 어두워 기준으로 쓸 수 없습니다. 더 밝은 흰색·회색 영역을 터치해 주세요."); return; }
+      if (!r) { toast("너무 어둡거나 밝은 영역입니다. 회색이나 흰색 피사체를 터치해 주세요"); return; }
       histDispatch({ type: "do", label: "WB 스포이트", action: { type: "patch", values: { temp: r.temp, tint: r.tint } } });
       toast(`WB 스포이트 적용 (색온도 ${r.temp}, 틴트 ${r.tint})`, { duration: 5000, actions: [{ label: "되돌리기", onClick: () => histDispatch({ type: "undo" }) }] });
     } catch (e) {

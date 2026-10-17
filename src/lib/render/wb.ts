@@ -78,6 +78,15 @@ export const WB_TINT_DUV = 0.05;
 
 /** COLOR_SCIENCE §8.1 M_wb (709 선형 → 709 선형), temp·tint ∈ [−100, 100] */
 export function wbMatrix(temp: number, tint: number): Mat3 {
+  // 비정상 입력(NaN/±Infinity)은 항등으로 폴백 — u_wbMatrix 가 NaN 이면 화면 전체가 검게 죽는다
+  if (!Number.isFinite(temp) || !Number.isFinite(tint)) return identityCopy();
+  const m = wbMatrixRaw(temp, tint);
+  return m.every((row) => row.every(Number.isFinite)) ? m : identityCopy();
+}
+
+const identityCopy = (): Mat3 => [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+
+function wbMatrixRaw(temp: number, tint: number): Mat3 {
   const miredShift = temp < 0 ? WB_MIRED_PER_UNIT_COOL * temp : WB_MIRED_PER_UNIT_WARM * temp;
   const Ts = Math.min(25000, Math.max(2000, 1e6 / (1e6 / 6504 - miredShift)));
   const d65 = uvFromXy(D65_XY[0], D65_XY[1]);

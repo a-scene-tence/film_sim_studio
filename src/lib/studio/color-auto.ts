@@ -65,16 +65,36 @@ export function solveNeutralWb(rgb: ArrayLike<number>): { temp: number; tint: nu
   return { temp: nz(normalizeValue("temp", best.t)), tint: nz(normalizeValue("tint", best.k)), error: best.e };
 }
 
+/** 스포이트가 기준으로 쓸 수 있는 표본 범위: 너무 어두운 암부·완전히 날아간 순백은 역산하지 않는다 */
+export const PICK_DARK_MAX = 0.005;
+export const PICK_WHITE_MIN = 0.995;
+export function isPickableSample(s: ArrayLike<number> | null | undefined): boolean {
+  if (!s || s.length < 3) return false;
+  const [r, g, b] = [s[0]!, s[1]!, s[2]!];
+  if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) return false;
+  return !(Math.max(r, g, b) < PICK_DARK_MAX) && !(Math.min(r, g, b) > PICK_WHITE_MIN);
+}
+
+/** 솔버 결과 → [−100,100] 정수. 유한하지 않으면 null */
+export function sanitizeWbValue(val: number): number | null {
+  return Number.isFinite(val) ? nz(Math.round(clamp(val, -100, 100))) : null;
+}
+
 /** 스포이트: (u,v) 주변 5×5 평균을 중성으로 만드는 색온도·틴트. 표본이 없거나 너무 어두우면 null */
 export function solveEyedropper(g: RgbaGrid, u: number, v: number): { temp: number; tint: number; sample: Rgb } | null {
   const sample = sampleWindowMean(g, u, v);
-  if (!sample) return null;
-  const s = solveNeutralWb(sample);
-  return s ? { temp: s.temp, tint: s.tint, sample } : null;
+  if (!isPickableSample(sample)) return null;
+  const s = solveNeutralWb(sample!);
+  const temp = s ? sanitizeWbValue(s.temp) : null, tint = s ? sanitizeWbValue(s.tint) : null;
+  return temp === null || tint === null ? null : { temp, tint, sample: sample! };
 }
 
 /** (temp, tint) → 필름·ISP·톤 커브 등 S0 이후 전체 픽셀 경로를 통과한 최종 표시 RGB(sRGB 인코딩, 0..1) */
 export type OutputEval = (temp: number, tint: number) => ArrayLike<number>;
+
+/** 후보 출력이 (0,0) 출력 최대 채널의 이 비율 미만이면 검정 붕괴로 본다 */
+export const OUT_COLLAPSE_RATIO = 0.25;
+export const OUT_WHITE_MIN = 0.995;
 
 /** 최종 출력 무채색 오차: 표시 RGB 채널 차이의 제곱합 */
 export function outputNeutralError(rgb: ArrayLike<number>): number {
@@ -87,8 +107,19 @@ export function outputNeutralError(rgb: ArrayLike<number>): number {
  * 필름 LUT 가 중성을 틴트해도 그 틴트까지 상쇄하는 값을 찾는다. 출력이 거의 검정/백이면 오차가 0 이어도 (0,0) 이 선택된다.
  */
 export function solveNeutralOutput(evalOut: OutputEval): { temp: number; tint: number; error: number; out: Rgb } {
-  const run = (t: number, k: number) => { const o = evalOut(t, k); return { e: outputNeutralError(o), o: [o[0]!, o[1]!, o[2]!] as Rgb }; };
-  const z = run(0, 0);
+  // 유한하지 않은 출력(NaN/Infinity)은 오차 +∞ 로 두어 후보에서 탈락시킨다
+  const z0 = evalOut(0, 0);
+  const z0max = Math.max(z0[0]!, z0[1]!, z0[2]!), z0min = Math.min(z0[0]!, z0[1]!, z0[2]!);
+  const run = (t: number, k: number) => {
+    const o = evalOut(t, k);
+    let e = outputNeutralError(o);
+    // 출력이 검정/순백으로 붕괴한 후보는 R=G=B 오차가 0 이어도 해가 아니다 (예: 백색점이 물리 범위를 벗어난 극단 조합)
+    const mx = Math.max(o[0]!, o[1]!, o[2]!), mn = Math.min(o[0]!, o[1]!, o[2]!);
+    if (mx < OUT_COLLAPSE_RATIO * z0max || (mn > OUT_WHITE_MIN && z0min <= OUT_WHITE_MIN)) e = Infinity;
+    return { e: Number.isFinite(e) ? e : Infinity, o: [o[0]!, o[1]!, o[2]!] as Rgb };
+  };
+  const z = { e: outputNeutralError(z0), o: [z0[0]!, z0[1]!, z0[2]!] as Rgb };
+  if (!Number.isFinite(z.e)) z.e = Infinity;
   let best = { t: 0, k: 0, e: z.e, o: z.o };
   const consider = (t: number, k: number) => {
     const tt = clamp(t, -100, 100), kk = clamp(k, -100, 100);
@@ -100,7 +131,7 @@ export function solveNeutralOutput(evalOut: OutputEval): { temp: number; tint: n
     const c = { ...best };
     for (let t = c.t - span; t <= c.t + span; t += step) for (let k = c.k - span; k <= c.k + span; k += step) consider(t, k);
   }
-  return { temp: nz(normalizeValue("temp", best.t)), tint: nz(normalizeValue("tint", best.k)), error: best.e, out: best.o };
+  return { temp: sanitizeWbValue(best.t) ?? 0, tint: sanitizeWbValue(best.k) ?? 0, error: best.e, out: best.o };
 }
 
 /**
@@ -110,9 +141,22 @@ export function solveNeutralOutput(evalOut: OutputEval): { temp: number; tint: n
 export function solveEyedropperOutput(
   g: RgbaGrid, u: number, v: number, makeEval: (sample: Rgb) => OutputEval,
 ): { temp: number; tint: number; sample: Rgb; out: Rgb } | null {
-  const sample = sampleWindowMean(g, u, v);
-  if (!sample || !(Math.max(sample[0], sample[1], sample[2]) > EPS)) return null;
-  const r = solveNeutralOutput(makeEval(sample));
+  return solveEyedropperSample(sampleWindowMean(g, u, v), makeEval);
+}
+
+/** 이미 계산된 Pre-WB 표본(5×5 평균)으로 풀이: 범위 밖 표본은 null, 결과는 항상 유한한 [−100,100] 정수 */
+export function solveEyedropperSample(
+  sample: Rgb | null, makeEval: (sample: Rgb) => OutputEval,
+): { temp: number; tint: number; sample: Rgb; out: Rgb } | null {
+  if (!sample || !isPickableSample(sample)) return null;
+  const inner = makeEval(sample);
+  // WB 행렬이 표본을 음수·비유한으로 보내는 후보(백색점이 물리 범위 밖)는 평가하지 않고 탈락시킨다
+  const guarded: OutputEval = (t, k) => {
+    const x = apply3(wbMatrix(t, k), sample);
+    return x.every((q) => Number.isFinite(q) && q > 0) ? inner(t, k) : [NaN, NaN, NaN];
+  };
+  const r = solveNeutralOutput(guarded);
+  if (!Number.isFinite(r.temp) || !Number.isFinite(r.tint) || !Number.isFinite(r.error)) return null;
   return { temp: r.temp, tint: r.tint, sample, out: r.out };
 }
 
