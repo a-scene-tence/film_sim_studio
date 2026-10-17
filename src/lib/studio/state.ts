@@ -9,6 +9,7 @@ export interface EditCurve { preset: CurveChoice; points: CurvePoint[]; zones: [
 export type SliderKey =
   | "filmStrength" | "lightBalance" | "exposure" | "brightness" | "contrast" | "highlights" | "shadows" | "whites" | "blacks"
   | "temp" | "tint" | "saturation" | "vibrance" | "cce" | "ccb" | "monoHue" | "monoAmount"
+  | "skinHue" | "skinSat" | "skinLum"
   | "sharpness" | "clarity" | "dehaze" | "hdfStrength" | "grainAmount" | "grainSize" | "vignette"
   | "zone0" | "zone1" | "zone2" | "zone3" | "zone4";
 /** EditState 의 수치 키 (구간 슬라이더 zone0..4 는 curve.zones 에 저장) */
@@ -41,6 +42,9 @@ export const SLIDERS: ReadonlyArray<SliderSpec> = [
   s("ccb", "color", "컬러 크롬 블루", 0, 2, 1, 0, "level"),
   s("monoHue", "color", "흑백 조색 · 색상", 0, 359, 1, 0, "degree"),
   s("monoAmount", "color", "흑백 조색 · 강도", 0, 100, 1, 0, "int"),
+  S100("skinHue", "color", "피부 색조"),
+  S100("skinSat", "color", "피부 혈색 (채도)"),
+  S100("skinLum", "color", "피부 투명도 (밝기)"),
   s("sharpness", "detail", "선명도", 0, 150, 1, 0, "int"),
   S100("clarity", "detail", "명료도"),
   S100("dehaze", "detail", "디헤이즈"),
@@ -50,6 +54,9 @@ export const SLIDERS: ReadonlyArray<SliderSpec> = [
   S100("vignette", "detail", "비네팅"),
   ...ZONE_LABELS.map((l, k) => S100(`zone${k}` as SliderKey, "curve", l)),
 ];
+
+/** STC-v1 피부톤 슬라이더 3종 (컬러 탭 "피부톤 (인물 보정)" 섹션) */
+export const SKIN_KEYS = ["skinHue", "skinSat", "skinLum"] as const satisfies ReadonlyArray<SliderKey>;
 
 export const SLIDER_BY_KEY: Readonly<Record<SliderKey, SliderSpec>> = Object.fromEntries(SLIDERS.map((x) => [x.key, x])) as Record<SliderKey, SliderSpec>;
 export const LEVEL_LABELS = ["끔", "약", "강"] as const;
@@ -61,6 +68,8 @@ export interface EditState {
   highlights: number; shadows: number; whites: number; blacks: number;
   temp: number; tint: number; saturation: number; vibrance: number;
   cce: number; ccb: number; monoHue: number; monoAmount: number;
+  /** STC-v1 피부톤 세부 조정 (−100..100, 기본 0): 색조(+ 붉은기 완화 / − 노란기 완화), 혈색(채도), 투명도(밝기) */
+  skinHue: number; skinSat: number; skinLum: number;
   sharpness: number; clarity: number; dehaze: number;
   hdf: boolean; hdfStrength: number; grainAmount: number; grainSize: number; vignette: number;
   curve: EditCurve;
@@ -285,7 +294,7 @@ export function resetTab(st: EditState, tab: TabId): EditState {
   switch (tab) {
     case "film": return pick(["simId", "filmStrength"]);
     case "light": return pick(["dRange", "lightBalance", "exposure", "brightness", "contrast", "highlights", "shadows", "whites", "blacks"]);
-    case "color": return pick(["temp", "tint", "saturation", "vibrance", "monoHue", "monoAmount", "cce", "ccb"]);
+    case "color": return pick(["temp", "tint", "saturation", "vibrance", "monoHue", "monoAmount", "cce", "ccb", ...SKIN_KEYS]);
     case "curve": return pick(["curve"]);
     case "detail": return pick(["sharpness", "clarity", "dehaze", "hdf", "hdfStrength", "grainAmount", "grainSize", "vignette"]);
   }

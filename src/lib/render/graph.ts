@@ -464,6 +464,7 @@ export class RenderGraph {
       pass: "post", target: out, size,
       f: { uSat: c.s.uSat, uVib: c.s.uVib, uClarity: c.s.uClarity },
       v2: { uMonoTint: c.s.uMonoTint },
+      v3: { uSkin: c.s.uSkin },
       tex: { uMainTex: main, uClarAB: clarAB },
     }));
   }

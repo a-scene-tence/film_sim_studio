@@ -157,7 +157,7 @@ S14 디더·출력
 - fs_dz_tt.glsl → src/lib/render/glsl/fs_small.ts (FS_DZ_TT_GLSL)
 - fs_dz_q.glsl → src/lib/render/glsl/fs_small.ts (FS_DZ_Q_GLSL)
 - fs_main.glsl → src/lib/render/glsl/fs_main.ts (FS_MAIN_GLSL)
-- fs_post.glsl → src/lib/render/glsl/fs_post.ts (FS_POST_GLSL)
+- fs_post.glsl → src/lib/render/glsl/fs_post.ts (FS_POST_GLSL) — STC-v1 피부톤 함수(skinHueW·skinMask·skinApply)는 src/lib/render/skin.ts 의 SKIN_GLSL 을 끼워 넣는다 (uniform vec3 uSkin, COLOR_SCIENCE §8.8b)
 - fs_blurL.glsl → src/lib/render/glsl/fs_small.ts (FS_BLURL_GLSL)
 - fs_final.glsl → src/lib/render/glsl/fs_final.ts (FS_FINAL_GLSL)
 - fs_probe.glsl → src/lib/render/glsl/fs_small.ts (FS_PROBE_GLSL)

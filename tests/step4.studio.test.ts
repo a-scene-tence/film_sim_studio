@@ -22,10 +22,10 @@ describe("T8 SLIDERS 표 · normalizeValue · buildUniforms", () => {
     highlights: [-100, 100, 1, 0], shadows: [-100, 100, 1, 0], whites: [-100, 100, 1, 0], blacks: [-100, 100, 1, 0], temp: [-100, 100, 1, 0], tint: [-100, 100, 1, 0],
     saturation: [-100, 100, 1, 0], vibrance: [-100, 100, 1, 0], cce: [0, 2, 1, 0], ccb: [0, 2, 1, 0], monoHue: [0, 359, 1, 0], monoAmount: [0, 100, 1, 0],
     sharpness: [0, 150, 1, 0], clarity: [-100, 100, 1, 0], dehaze: [-100, 100, 1, 0], hdfStrength: [0, 200, 1, 100], grainAmount: [0, 100, 1, 0], grainSize: [0, 100, 1, 0],
-    vignette: [-100, 100, 1, 0], zone0: [-100, 100, 1, 0], zone1: [-100, 100, 1, 0], zone2: [-100, 100, 1, 0], zone3: [-100, 100, 1, 0], zone4: [-100, 100, 1, 0],
+    vignette: [-100, 100, 1, 0], skinHue: [-100, 100, 1, 0], skinSat: [-100, 100, 1, 0], skinLum: [-100, 100, 1, 0], zone0: [-100, 100, 1, 0], zone1: [-100, 100, 1, 0], zone2: [-100, 100, 1, 0], zone3: [-100, 100, 1, 0], zone4: [-100, 100, 1, 0],
   };
-  it("키 29개와 min/max/step/기본값", () => {
-    expect(SLIDERS.length).toBe(29);
+  it("키 32개(STC-v1 피부톤 3종 포함)와 min/max/step/기본값", () => {
+    expect(SLIDERS.length).toBe(32);
     for (const [k, [min, max, step, def]] of Object.entries(T)) {
       const s = SLIDER_BY_KEY[k as SliderKey];
       expect([s.min, s.max, s.step, s.def]).toEqual([min, max, step, def]);

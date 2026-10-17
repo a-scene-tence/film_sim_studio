@@ -71,6 +71,10 @@ export interface RenderParams {
   monoAmount: number;
   /** FSE-v2 §5-1 D레인지 100/200/400 (drStops 0/1/2, uRollW) */
   dRange: DRange;
+  /** STC-v1 피부톤 세부 조정 −100..100 (생략 = 0, COLOR_SCIENCE §8.8b) */
+  skinHue?: number;
+  skinSat?: number;
+  skinLum?: number;
   /**
    * Step 4 스튜디오 모드: true 면 adjust·cce·fxb·hdf 가 이미 레시피 값을 포함한 절대값이라 숨은 레시피 레이어를 더하지 않는다
    * (selectSim 이 연동 키를 슬라이더에 복사하므로 이중 적용 금지). false(기본) 는 Step 3 동작 그대로.
@@ -93,6 +97,8 @@ export interface Effective {
   filmStrength: number;
   hdfK: number;
   monoTint: [number, number];
+  /** STC-v1 uSkin = (skinHue, skinSat, skinLum)/100, 흑백 필름은 (0,0,0) */
+  skin: [number, number, number];
 }
 
 const clampTo = (k: AdjustKey, v: number) => Math.min(SLIDER_RANGE[k][1], Math.max(SLIDER_RANGE[k][0], v));
@@ -103,6 +109,7 @@ export function effectiveParams(p: RenderParams, mono: boolean): Effective {
     filmStrength: p.filmStrength / 100,
     hdfK: p.hdfStrength / 100,
     monoTint: monoTintUniform(mono, p.monoHue, p.monoAmount),
+    skin: skinUniform(mono, p.skinHue ?? 0, p.skinSat ?? 0, p.skinLum ?? 0),
   };
   const lv = (v: "recipe" | Level): Level => (v === "recipe" ? 0 : v);
   const adjust = p.absolute ? { ...p.adjust } : (Object.fromEntries((Object.keys(p.adjust) as AdjustKey[]).map((k) => [k, clampTo(k, p.adjust[k])])) as Adjust);
@@ -117,6 +124,13 @@ export function monoTintUniform(mono: boolean, hueDeg: number, amount: number): 
   return [C * Math.cos(h), C * Math.sin(h)];
 }
 
+const clamp100 = (v: number) => (Number.isFinite(v) ? Math.min(100, Math.max(-100, v)) : 0) / 100;
+/** STC-v1 uSkin: 컬러 필름이면 각 값/100 (clamp ±1), 흑백 필름은 피부톤 단계를 끈다 */
+export function skinUniform(mono: boolean, hue: number, sat: number, lum: number): [number, number, number] {
+  if (mono) return [0, 0, 0];
+  return [clamp100(hue) + 0, clamp100(sat) + 0, clamp100(lum) + 0];
+}
+
 /** OPT-v1 (COLOR_SCIENCE §10): CCE 최대 명도 농도 7.5% / 14.5%, FX Blue CPL 최대 명도 농도 6.5% / 13% */
 export const KE_LEVELS = [0, 0.075, 0.145] as const;
 export const KB_LEVELS = [0, 0.065, 0.13] as const;
@@ -128,6 +142,8 @@ export interface ScalarUniforms {
   uKe: number; uKb: number; uExpGain: number;
   /** Step 4 */
   uFilmStrength: number; uHdfK: number; uMonoTint: [number, number];
+  /** STC-v1 */
+  uSkin: [number, number, number];
 }
 
 export function scalarUniforms(e: Effective): ScalarUniforms {
@@ -136,7 +152,7 @@ export function scalarUniforms(e: Effective): ScalarUniforms {
     uSh: a.shadows / 100, uHi: a.highlights / 100, uWh: a.whites / 100, uBk: a.blacks / 100, uBr: a.brightness / 100, uLb: a.lightBalance / 100, uCt: a.contrast / 100,
     uVig: a.vignette, uSat: a.saturation, uVib: a.vibrance, uClarity: a.clarity, uSharpen: a.sharpen, uGrainAmt: a.grainAmount, uDehaze: a.dehaze,
     uKe: KE_LEVELS[e.cce], uKb: KB_LEVELS[e.fxb], uExpGain: Math.pow(2, Math.min(5, Math.max(-5, a.exposure))),
-    uFilmStrength: e.filmStrength, uHdfK: e.hdfK, uMonoTint: e.monoTint,
+    uFilmStrength: e.filmStrength, uHdfK: e.hdfK, uMonoTint: e.monoTint, uSkin: e.skin,
   };
 }
 

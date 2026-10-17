@@ -13,7 +13,7 @@ import { AUTO_LIGHT_LABEL, computeAutoLightMode, type AutoLightMode } from "@/li
 import { autoProfile, badgeText, type InputChoice } from "@/lib/studio/input-profile";
 import { editReducer, initialEditState, isEditDefault, isTabDefault, mediaOpenState, RESET_ALL_LABEL, TAB_RESET_LABEL, type EditAction, type SimInfo, type TabId } from "@/lib/studio/state";
 import { AboutSheet } from "./AboutSheet";
-import { computeAutoChroma, computeAutoWb, solveEyedropperSample } from "@/lib/studio/color-auto";
+import { computeAutoChroma, computeAutoSkin, computeAutoWb, solveEyedropperSample } from "@/lib/studio/color-auto";
 import { HistoryTimelineSheet } from "./HistoryTimelineSheet";
 import { historyReducer, historyTimeline, initialHistory, redoLabel, undoLabel } from "@/lib/studio/history";
 import { startThumbnails } from "@/lib/studio/thumbs";
@@ -296,6 +296,19 @@ export default function Studio() {
       toast(e instanceof Error ? e.message : String(e));
     }
   }, [renderer, asset, state.temp, state.tint, toast]);
+  // STC-v1 피부톤 자동: 피부톤 3값만 0 으로 둔 현재 최종 출력(필름·WB 적용)에서 피부 후보를 찾아 세 값을 한 번에 정한다
+  const runAutoSkin = useCallback(() => {
+    if (!renderer || !asset) return;
+    try {
+      const r = computeAutoSkin(renderer.readOutputWithoutSkin());
+      if (!r) { toast("피부톤으로 보이는 영역이 너무 적습니다. 인물이 크게 나온 사진에서 사용해 주세요"); return; }
+      if (r.skinHue === state.skinHue && r.skinSat === state.skinSat && r.skinLum === state.skinLum) { toast("피부톤이 이미 자연스러워 바꿀 값이 없습니다"); return; }
+      histDispatch({ type: "do", label: "피부톤 자동 보정", action: { type: "patch", values: { skinHue: r.skinHue, skinSat: r.skinSat, skinLum: r.skinLum } } });
+      toast("피부톤 자동 보정 적용", { duration: 5000, actions: [{ label: "되돌리기", onClick: () => histDispatch({ type: "undo" }) }] });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e));
+    }
+  }, [renderer, asset, state.skinHue, state.skinSat, state.skinLum, toast]);
   const onPick = useCallback((u: number, v: number) => {
     if (!renderer || !asset) return;
     try {
@@ -425,7 +438,7 @@ export default function Studio() {
               <TabResetBar tab={tab} changed={tabChanged} disabled={!asset || historyLocked} onReset={resetCurrentTab} />
               {tab === "film" ? <FilmTab /> : null}
               {tab === "light" ? <LightTab onAuto={runAuto} /> : null}
-              {tab === "color" ? <ColorTab onAutoWb={runAutoWb} onAutoChroma={runAutoChroma} picking={picking} onTogglePick={() => setPicking((p) => !p)} /> : null}
+              {tab === "color" ? <ColorTab onAutoWb={runAutoWb} onAutoChroma={runAutoChroma} onAutoSkin={runAutoSkin} picking={picking} onTogglePick={() => setPicking((p) => !p)} /> : null}
               {tab === "curve" ? <CurveTab /> : null}
               {tab === "detail" ? <DetailTab /> : null}
             </div>

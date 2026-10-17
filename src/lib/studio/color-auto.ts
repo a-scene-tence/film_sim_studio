@@ -1,6 +1,7 @@
 // 컬러 탭 도구: 컬러 자동 보정(ACA-v1)과 화이트밸런스 스포이트. 입력은 모두 WB 적용 전(Pre-WB) 작업 색공간 선형 RGBA 격자다.
 // 수식 정의는 docs/COLOR_SCIENCE.md §16.10 / §16.11.
-import { linToOklab } from "../color/fse/engine.mjs";
+import { linToOklab, srgbDec } from "../color/fse/engine.mjs";
+import { SKIN_H0, SKIN_HUE_MAX, SKIN_LUM_MAX, SKIN_SAT_DOWN, SKIN_SAT_UP, skinMask } from "../render/skin";
 import { apply3, wbMatrix } from "../render/wb";
 import { normalizeValue } from "./state";
 
@@ -243,4 +244,66 @@ export function computeAutoColor(g: RgbaGrid): AutoColorResult | null {
   if (!px) return null;
   const wb = wbOf(px);
   return { ...wb, ...chromaOf(px, wb.temp, wb.tint), used: px.length };
+}
+
+// ── 피부톤 자동 보정 STC-v1 (COLOR_SCIENCE §16.14) ──────────────────────────
+/** 피부 후보: skinMask ≥ 0.25 인 픽셀 (가중치 = wSkin) */
+export const SKIN_AUTO_MIN_W = 0.25;
+/** 피부 후보의 가중 면적이 분석 픽셀의 이 비율 미만이면 보정하지 않는다 */
+export const SKIN_AUTO_MIN_FRACTION = 0.015;
+/** 목표: 색상 = 마스크 중심(47°), 크로마 상한 0.095, 명도 하한 0.62 → 0.66 */
+export const SKIN_AUTO_C_MAX = 0.095;
+export const SKIN_AUTO_C_PALE = 0.045;
+export const SKIN_AUTO_L_MIN = 0.62;
+export const SKIN_AUTO_L_TARGET = 0.66;
+/** 자연스러움을 위해 계산된 교정량의 일부만 적용한다 */
+export const SKIN_AUTO_GAIN = 0.8;
+
+export interface AutoSkinResult {
+  skinHue: number; skinSat: number; skinLum: number;
+  /** 피부 후보의 가중 면적 비율 (0..1) */
+  fraction: number;
+  /** 가중 평균 OKLab 명도·크로마·색상° */
+  meanL: number; meanC: number; meanH: number;
+}
+
+/**
+ * 피부톤 자동 보정. 입력 = 피부톤 3값을 0 으로 둔 현재 최종 출력(표시 인코딩 RGBA8, 필름·WB 적용 상태).
+ *  1) 각 픽셀 w = skinMask(OKLab, v), w ≥ 0.25 만 가중치 w 로 누적 → 가중 평균 (a, b), L, C
+ *  2) 가중 면적 Σw / N < 1.5 % 면 null (피부가 거의 없음)
+ *  3) 색조: dh = wrap180(h̄ − 47°), |dh| < 1.5° 면 0, 아니면 skinHue = clamp(round(−0.8·dh/14·100), −70, 70)
+ *     (붉게 치우침 dh < 0 → +, 누렇게 치우침 dh > 0 → −)
+ *  4) 채도: C̄ > 0.095 → g = 0.095/C̄, skinSat = max(−40, round(0.8·(g − 1)/0.45·100)),
+ *           C̄ < 0.045 → g = 0.045/C̄, skinSat = min(15, round(0.8·(g − 1)/0.35·100)), 그 외 0
+ *  5) 밝기: L̄ < 0.62 → skinLum = clamp(round(0.8·(0.66/L̄ − 1)/(0.18·4L̄(1 − L̄))·100), 0, 50), 그 외 0
+ */
+export function computeAutoSkin(g: { width: number; height: number; data: ArrayLike<number> }, scale = 255): AutoSkinResult | null {
+  const n = g.width * g.height;
+  if (n === 0) return null;
+  let sw = 0, sa = 0, sb = 0, sL = 0, sC = 0, used = 0;
+  for (let i = 0; i < n; i++) {
+    const v = [g.data[i * 4]! / scale, g.data[i * 4 + 1]! / scale, g.data[i * 4 + 2]! / scale];
+    if (!v.every(Number.isFinite)) continue;
+    used++;
+    const [L, a, b] = linToOklab(v.map((q) => srgbDec(Math.min(1, Math.max(0, q))))) as number[];
+    const w = skinMask(L!, a!, b!, v);
+    if (w < SKIN_AUTO_MIN_W) continue;
+    sw += w; sa += w * a!; sb += w * b!; sL += w * L!; sC += w * Math.hypot(a!, b!);
+  }
+  if (used === 0) return null;
+  const fraction = sw / used;
+  if (fraction < SKIN_AUTO_MIN_FRACTION) return null;
+  const meanL = sL / sw, meanC = sC / sw;
+  const meanH = ((Math.atan2(sb / sw, sa / sw) * 180) / Math.PI + 360) % 360;
+  const dh = ((meanH - SKIN_H0 + 540) % 360) - 180;
+  const hue = Math.abs(dh) < 1.5 ? 0 : clamp(Math.round((-SKIN_AUTO_GAIN * dh / SKIN_HUE_MAX) * 100), -70, 70);
+  let sat = 0;
+  if (meanC > SKIN_AUTO_C_MAX) sat = Math.max(-40, Math.round((SKIN_AUTO_GAIN * (SKIN_AUTO_C_MAX / meanC - 1)) / SKIN_SAT_DOWN * 100));
+  else if (meanC < SKIN_AUTO_C_PALE) sat = Math.min(15, Math.round((SKIN_AUTO_GAIN * (SKIN_AUTO_C_PALE / meanC - 1)) / SKIN_SAT_UP * 100));
+  let lum = 0;
+  if (meanL < SKIN_AUTO_L_MIN) lum = clamp(Math.round((SKIN_AUTO_GAIN * (SKIN_AUTO_L_TARGET / meanL - 1)) / (SKIN_LUM_MAX * 4 * meanL * (1 - meanL)) * 100), 0, 50);
+  return {
+    skinHue: nz(normalizeValue("skinHue", hue)), skinSat: nz(normalizeValue("skinSat", sat)), skinLum: nz(normalizeValue("skinLum", lum)),
+    fraction, meanL, meanC, meanH,
+  };
 }
