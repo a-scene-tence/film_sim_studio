@@ -7,6 +7,7 @@ import { encodeLutInput } from "../color/fse/lut-domain.mjs";
 import { tetraSample } from "../color/fse/tetra.mjs";
 import * as T from "../color/source/transfer.mjs";
 import { sampleCurve } from "./curve";
+import { edgeSoftenL, filmShoulder, hdOp, rolloffW, zoneShadowPop } from "./isp-ops";
 import { apply3, type Mat3 } from "./wb";
 
 export type Vec3 = [number, number, number];
@@ -50,6 +51,8 @@ export interface NormalizeCtx {
   rolloff: boolean;
   wb: Mat3;
   expGain: number;
+  /** FSE-v2 §5-1 롤오프 상한 uRollW (기본 2.04 = DR100) */
+  rollW?: number;
 }
 
 /** decodeToSrcLinear (GPU 는 Tref⁻¹ 를 4096칸 표로, CPU 참조는 48회 이분법 정확값) */
@@ -99,12 +102,9 @@ export function rgc(c: ArrayLike<number>): Vec3 {
   return map3(cd, (x) => ach - x * ach);
 }
 
-/** 섹션 5.4 필름 하이라이트 롤오프 */
-export function rolloff(x: ArrayLike<number>): Vec3 {
-  const Y = dot(LUMA, map3(x, (v) => Math.max(v, 0)));
-  if (Y <= 1) return [x[0]!, x[1]!, x[2]!];
-  const Yp = 1 + 1.04 * Math.tanh((Y - 1) / 1.04);
-  return map3(x, (v) => v * (Yp / Y));
+/** 섹션 5.4 필름 하이라이트 롤오프 (FSE-v2: 상한 rollW = 2.04·2^drStops, 기본 DR100 = 2.04) */
+export function rolloff(x: ArrayLike<number>, rollW = 2.04): Vec3 {
+  return rolloffW(x, rollW);
 }
 
 /** fs_normalize 의 픽셀 경로(4탭 영역 표본 제외) */
@@ -112,7 +112,7 @@ export function normalizePixel(v: ArrayLike<number>, c: NormalizeCtx): Vec3 {
   let x = apply3(c.srcToWS, decodeToSrcLinear(v, c));
   if (c.samsungFix) x = samsungFix(x);
   if (c.rgc) x = rgc(x);
-  if (c.rolloff) x = rolloff(x);
+  if (c.rolloff) x = rolloff(x, c.rollW ?? 2.04);
   return map3(apply3(c.wb, x), (q) => q * c.expGain);
 }
 
@@ -134,8 +134,8 @@ export function dehazeApply(x: ArrayLike<number>, D: number, A: ArrayLike<number
 
 export interface ToneSliders { sh: number; hi: number; wh: number; bk: number; br: number; lb: number }
 
-/** 섹션 5.8 베이스 레이어 톤. ab = 가이드 필터 (mean_a, mean_b) — Bs = a·Yl + b */
-export function baseTone(x: ArrayLike<number>, ab: [number, number], s: ToneSliders): Vec3 {
+/** 섹션 5.8 베이스 레이어 톤. ab = 가이드 필터 (mean_a, mean_b) — Bs = a·Yl + b. isp = FSE-v2 §5-4 ZS 암부 밀도(sd)·3D 팝(pop) */
+export function baseTone(x: ArrayLike<number>, ab: [number, number], s: ToneSliders, isp: { sd: number; pop: number } = { sd: 0, pop: 0 }): Vec3 {
   const Y = dot(LUMA, x);
   if (Y <= 2 ** -20) return [x[0]!, x[1]!, x[2]!];
   const Yl = Math.log2(Y);
@@ -147,8 +147,9 @@ export function baseTone(x: ArrayLike<number>, ab: [number, number], s: ToneSlid
   const mwh = sstep(1.5, 3.8, e);
   const mbk = 1 - sstep(-7, -3, e);
   const mmid = Math.exp(-0.5 * sq(e / 1.8));
-  const dB = 1.5 * s.sh * msh + 1.5 * s.hi * mhi + s.wh * mwh + s.bk * mbk + s.br * mmid + 1.2 * s.lb * (msh - mhi);
-  const Yp = Math.pow(2, Bs + dB + Dt);
+  const z = zoneShadowPop(Bs, Dt, isp.sd, isp.pop);
+  const dB = 1.5 * s.sh * msh + 1.5 * s.hi * mhi + s.wh * mwh + s.bk * mbk + s.br * mmid + 1.2 * s.lb * (msh - mhi) + z.dB;
+  const Yp = Math.pow(2, Bs + dB + z.Dt);
   return map3(x, (v) => v * (Yp / Y));
 }
 
@@ -275,11 +276,11 @@ export function postChroma(v: ArrayLike<number>, sat: number, vib: number, clari
 /** 섹션 5.13 L' = L + 1.2(Cl/100)(L−base)·4L(1−L) */
 export const clarityL = (L: number, base: number, Cl: number) => L + 1.2 * (Cl / 100) * (L - base) * 4 * L * (1 - L);
 
-/** 섹션 5.14 L' = L + (Sh/100)·1.2·D', D' = sign(D)·max(|D|−0.004, 0) */
-export function sharpenL(L: number, blur: number, Sh: number): number {
+/** 섹션 5.14 L' = L + (Sh/100)·1.2·D', D' = sign(D)·max(|D|−0.004, 0). FSE-v2 §5-5: − es·sstep(0.012, 0.045, |D|)·D */
+export function sharpenL(L: number, blur: number, Sh: number, es = 0): number {
   const D = L - blur;
   const Dp = Math.sign(D) * Math.max(Math.abs(D) - 0.004, 0);
-  return L + (Sh / 100) * 1.2 * Dp;
+  return edgeSoftenL(L + (Sh / 100) * 1.2 * Dp, D, es);
 }
 
 // ── S13 그레인 (Ashima/Gustavson webgl-noise, MIT) ─────────────────────────
@@ -361,6 +362,8 @@ export interface PixelCtx {
   /** Step 4: 필름 강도 0..1 (기본 1), 흑백 조색 uMonoTint (mono 일 때만 적용) */
   filmStrength?: number;
   monoTint?: [number, number];
+  /** FSE-v2 카메라 ISP 픽셀 단계: S6b 필름 숄더(drStops, sceneRef), S7b 하이라이트 밀도(hd). 공간 단계(MH, ZS·팝, ES)는 프로브에서 꺼진다 */
+  isp?: { drStops: number; sceneRef: boolean; hd: number };
 }
 
 /** v = 소스 텍셀, (u, vv) = 전역 uv, (pxX, pxY) = 이미지 픽셀 중심 좌표 */
@@ -369,8 +372,10 @@ export function pixelPipeline(v: ArrayLike<number>, u: number, vv: number, pxX: 
   if (c.ct !== 0) x = contrastOp(x, c.ct);
   if (c.vig !== 0) { const f = vignetteF(u, vv, c.aspect, c.vig); x = map3(x, (q) => q * f); }
   x = clipNeg(x);
+  if (c.isp) x = filmShoulder(x, c.isp.drStops, c.isp.sceneRef);
   let o = lutStage(x, c.lut);
   if (c.lut.mode !== 0 && (c.filmStrength ?? 1) < 1) o = filmStrengthMix(originalEnc(x), o, c.filmStrength ?? 1);
+  if (c.isp && c.isp.hd > 0) o = hdOp(o, c.isp.hd, gamutMap16);
   if (!c.mono && (c.ke > 0 || c.kb > 0)) o = cceOp(o, c.ke, c.kb);
   if (c.curve) o = applyCurve(o, c.curve);
   o = postChroma(o, c.sat, c.vib, 0, null, c.mono ? (c.monoTint ?? null) : null);

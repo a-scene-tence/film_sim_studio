@@ -1,4 +1,5 @@
 // 섹션 7.1 크기·반경, 5.6/8.6 HDF 레벨, 8.5 그레인 유니폼 — 렌더 그래프가 쓰는 순수 계산.
+import { MH_SIGMA_FRAC } from "./isp";
 export interface Size { width: number; height: number }
 export type MediaMode = "photo" | "video";
 
@@ -82,4 +83,18 @@ export function grainScalePreview(outLong: number, rLong: number, size: number):
 /** 섹션 12: 패딩 P = ceil(3·σc_out) + 8 */
 export function tilePadding(outFull: Size): number {
   return Math.ceil(3 * 0.0035 * Math.hypot(outFull.width, outFull.height)) + 8;
+}
+
+export interface MhPlan { sigma: number; level: number; sigmaL: number; radius: number }
+
+/**
+ * FSE-v2 §5-3 마이크로 할레이션 블러: σ = MH_SIGMA_FRAC·hypot(W, H) (이 렌더의 px), 추출 레벨 ℓ = 1 에서 시작해
+ * ceil(3σ/2^ℓ) ≤ 12 가 될 때까지 fs_down2 로 한 단계씩 줄인다. σℓ = σ/2^ℓ, 반경 = max(1, ceil(3σℓ)).
+ */
+export function mhPlan(full: Size): MhPlan {
+  const sigma = MH_SIGMA_FRAC * Math.hypot(full.width, full.height);
+  let level = 1;
+  while (Math.ceil((3 * sigma) / 2 ** level) > 12) level++;
+  const sigmaL = sigma / 2 ** level;
+  return { sigma, level, sigmaL, radius: Math.max(1, Math.ceil(3 * sigmaL)) };
 }

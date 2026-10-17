@@ -32,6 +32,7 @@ export function buildRenderParams(st: EditState, o: BuildOptions = {}): RenderPa
     hdfStrength: st.hdfStrength,
     monoHue: st.monoHue,
     monoAmount: st.monoAmount,
+    dRange: 100,
     absolute: true,
   };
 }

@@ -1,5 +1,6 @@
 // 섹션 9.3 실효값 — 사용자 슬라이더 + 레시피(숨은 레이어) → 셰이더 전달 값.
 import { LINEAR_CURVE, type CurveState } from "./curve";
+import type { DRange } from "./isp";
 import { recipeFor, recipeGrain } from "./recipes";
 
 export type AdjustKey =
@@ -69,6 +70,8 @@ export interface RenderParams {
   /** Step 4 §5-6: 흑백 조색 색상 0..359° / 강도 0..100 */
   monoHue: number;
   monoAmount: number;
+  /** FSE-v2 §5-1 D레인지 100/200/400 (drStops 0/1/2, uRollW) */
+  dRange: DRange;
   /**
    * Step 4 스튜디오 모드: true 면 adjust·cce·fxb·hdf 가 이미 레시피 값을 포함한 절대값이라 숨은 레시피 레이어를 더하지 않는다
    * (selectSim 이 연동 키를 슬라이더에 복사하므로 이중 적용 금지). false(기본) 는 Step 3 동작 그대로.
@@ -78,7 +81,7 @@ export interface RenderParams {
 
 export const DEFAULT_PARAMS: RenderParams = {
   sim: "none", lookLutId: null, sourceLutId: null, adjust: ZERO_ADJUST, cce: "recipe", fxb: "recipe", hdf: "recipe", curve: LINEAR_CURVE, iso: null,
-  filmStrength: 100, hdfStrength: 100, monoHue: 0, monoAmount: 0, absolute: false,
+  filmStrength: 100, hdfStrength: 100, monoHue: 0, monoAmount: 0, dRange: 100, absolute: false,
 };
 
 export interface Effective {

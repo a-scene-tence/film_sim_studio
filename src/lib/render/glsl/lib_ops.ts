@@ -1,4 +1,4 @@
-// docs/RENDERER.md 섹션 6 lib_ops.glsl — 정본. Step 4 §5-2 패치(uHdfK)만 허용.
+// docs/RENDERER.md 섹션 6 lib_ops.glsl — 정본. Step 4 §5-2 패치(uHdfK), FSE-v2 §5-7-1 패치(mhComposite)만 허용.
 export const LIB_OPS_GLSL = `// ===== lib_ops.glsl : shared per-pixel operators =====
 uniform vec2 uDstSize;     // render target size (px)
 uniform vec2 uTileOrigin;  // display-px origin of this target inside the full image (preview: 0,0)
@@ -14,6 +14,15 @@ vec3 hdfComposite(vec3 x, vec2 uvL, vec2 uvG) {
   if (!uHdf) return x;
   vec3 s = emitHdf(x);
   return x + uHdfK * (-0.48 * s + 0.30 * texture(uCore, uvL).rgb + 0.18 * texture(uHalo, uvG).rgb);
+}
+uniform float uIspMh;      // micro-halation gain = brand ISP mh x film strength (0 = off)
+uniform vec3 uIspMhTint;   // micro-halation tint (brand ISP)
+uniform sampler2D uMH;     // blurred micro-halation emitters, sampled with local uv
+const float ISP_Y88 = 0.840607362;  // scene Y whose T_ref display L = 0.88
+vec3 emitMh(vec3 x) { vec3 c = max(x, 0.0); float Y = dot(LUMA, c); return c * sstep(ISP_Y88, 2.04, Y); }
+vec3 mhComposite(vec3 x, vec2 uvL) {
+  if (uIspMh <= 0.0) return x;
+  return x + uIspMh * (uIspMhTint * texture(uMH, uvL).rgb - 0.25 * emitMh(x));
 }
 uniform float uDehaze;     // -100..100
 uniform vec3 uAtm;         // atmospheric light A

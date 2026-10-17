@@ -1,5 +1,5 @@
-// docs/RENDERER.md 섹션 6 fs_main.glsl — 정본. Step 4 §5-3 패치(uFilmStrength, lutRaw/lutStage)만 허용.
-export const FS_MAIN_GLSL = `// ===== fs_main : S1~S7 (HDF, dehaze, base tone, contrast, vignette, clip, film LUT) =====
+// docs/RENDERER.md 섹션 6 fs_main.glsl — 정본. Step 4 §5-3 패치(uFilmStrength, lutRaw/lutStage), FSE-v2 §5-7-3~6 패치(ISP: ZS·팝, filmShoulder, hdOp, mhComposite)만 허용.
+export const FS_MAIN_GLSL = `// ===== fs_main : S1~S7b (HDF, micro-halation, dehaze, base tone, contrast, vignette, clip, film shoulder, film LUT, highlight density) =====
 uniform sampler2D uWS;
 uniform bool uToneOps;
 uniform sampler2D uToneAB;   // RG (mean_a, mean_b), global uv
@@ -16,6 +16,13 @@ uniform vec3 uLutDomMin;
 uniform vec3 uLutDomMax;
 uniform mat3 uWsToSG3C;
 uniform float uFilmStrength; // 0..1 (UI 0..100 %, default 1)
+uniform float uIspSd;        // zone I-II shadow density (stops) = brand ISP sd x film strength
+uniform float uIspPop;       // zone III-IV micro-contrast gain = brand ISP pop x film strength
+uniform float uIspHd;        // highlight density = brand ISP hd x film strength
+uniform float uDrStops;      // 0, 1, 2 (DR100 / DR200 / DR400)
+uniform bool uSceneRef;      // true when the source has highlight headroom (RAW, Log, HLG)
+const float ISP_YK = 0.328679008;  // scene Y whose T_ref display L = 0.70
+const float ISP_UO = 2.63381793;   // log2(2.04 / ISP_YK)
 out vec4 outColor;
 vec3 baseTone(vec3 x, vec2 uvG) {
   float Y = dot(LUMA, x);
@@ -30,8 +37,11 @@ vec3 baseTone(vec3 x, vec2 uvG) {
   float mwh = sstep(1.5, 3.8, e);
   float mbk = 1.0 - sstep(-7.0, -3.0, e);
   float mmid = exp(-0.5 * sq(e / 1.8));
-  float dB = 1.5 * uSh * msh + 1.5 * uHi * mhi + 1.0 * uWh * mwh + 1.0 * uBk * mbk + 1.0 * uBr * mmid + 1.2 * uLb * (msh - mhi);
-  float Yp = exp2(Bs + dB + Dt);
+  float msd = exp(-0.5 * sq((e + 3.5) / 1.0));
+  float mz = exp(-0.5 * sq((e + 1.5) / 1.2));
+  float dB = 1.5 * uSh * msh + 1.5 * uHi * mhi + 1.0 * uWh * mwh + 1.0 * uBk * mbk + 1.0 * uBr * mmid + 1.2 * uLb * (msh - mhi) - uIspSd * msd;
+  float Dt2 = Dt + uIspPop * mz * Dt / (1.0 + sq(Dt / 0.6));
+  float Yp = exp2(Bs + dB + Dt2);
   return x * (Yp / Y);
 }
 vec3 contrastOp(vec3 x) {
@@ -57,6 +67,22 @@ vec3 clipNeg(vec3 x) {
   if (Y <= 0.0) return vec3(0.0);
   float t = Y / (Y - n);
   return vec3(Y) + t * (x - vec3(Y));
+}
+vec3 filmShoulder(vec3 x) {
+  if (uDrStops <= 0.0) return x;
+  float Y = dot(LUMA, max(x, 0.0));
+  if (Y <= ISP_YK) return x;
+  float Ui = uSceneRef ? ISP_UO + uDrStops : ISP_UO;
+  float u = log2(Y / ISP_YK);
+  float up = u >= Ui ? ISP_UO : ISP_UO * (1.0 - pow(1.0 - u / Ui, Ui / ISP_UO));
+  return x * (ISP_YK * exp2(up) / Y);
+}
+vec3 hdOp(vec3 v) {
+  vec3 lab = linToOklab(srgbDec(v));
+  if (lab.x <= 0.70) return v;
+  float t = min(1.0, (lab.x - 0.70) / 0.30);
+  lab.x = 0.70 + 0.30 * (t - uIspHd * t * t * sq(1.0 - t));
+  return srgbEnc(gamutMap(lab));
 }
 float slog3Enc(float x) { return x >= 0.01125 ? (420.0 + log2((x + 0.01) / 0.19) * 0.30102999566398 * 261.5) / 1023.0 : (x * (171.2102946929 - 95.0) / 0.01125 + 95.0) / 1023.0; }
 vec3 toneRef3(vec3 x) { return vec3(toneRef(x.r), toneRef(x.g), toneRef(x.b)); }
@@ -85,11 +111,15 @@ void main() {
   vec2 uvG = uvGlobal();
   vec3 x = texelFetch(uWS, ivec2(gl_FragCoord.xy), 0).rgb;
   x = hdfComposite(x, uvL, uvG);
+  x = mhComposite(x, uvL);
   x = dehazeApply(x, uvG);
   if (uToneOps) x = baseTone(x, uvG);
   if (uCt != 0.0) x = contrastOp(x);
   if (uVig != 0.0) x *= vignetteF(uvG);
   x = clipNeg(x);
-  outColor = vec4(lutStage(x), 1.0);
+  x = filmShoulder(x);
+  vec3 v = lutStage(x);
+  if (uIspHd > 0.0) v = hdOp(v);
+  outColor = vec4(v, 1.0);
 }
 `;

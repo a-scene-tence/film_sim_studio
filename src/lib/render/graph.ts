@@ -3,8 +3,9 @@ import { computeAtmosphere, type Vec3 } from "./dehaze-atm";
 import { buildProgram, createLut3D, createTex2D, readFloatRGBA, renderErrors, TargetPool, type Program, type RendererCaps, type Sized, type Target } from "./gl";
 import type { PassName } from "./glsl";
 import { srgbToP3Uniform, type OutputSpace } from "./output-space";
+import type { IspUniforms } from "./isp";
 import type { ScalarUniforms } from "./params";
-import { fixedLongSize, graphSizes, levelSize, type HdfPlan, type MediaMode, type Size } from "./plan";
+import { fixedLongSize, graphSizes, levelSize, type HdfPlan, type MediaMode, type MhPlan, type Size } from "./plan";
 
 type TexLike = WebGLTexture | Target;
 
@@ -61,6 +62,10 @@ export interface ChainParams {
   grain: { scale: number; off: [number, number] };
   /** σ 는 R 픽셀 단위 (미리보기: D = diag(R)) */
   hdfPlan: HdfPlan;
+  /** FSE-v2 카메라 ISP 유니폼 (isp.ts ispUniforms) */
+  isp: IspUniforms;
+  /** FSE-v2 §5-3 마이크로 할레이션 블러 (σ 는 이 렌더의 px 단위) */
+  mhPlan: MhPlan;
 }
 
 /** hist: Step 4 §8-4 — 캔버스 출력 직후 같은 체인을 RGBA8 로 한 번 더 그려 긴 변 256 으로 다운샘플한 픽셀을 돌려준다 */
@@ -85,6 +90,8 @@ export interface TileChain {
   out: Size;
   /** 출력 전체 기준 HDF (core 만 타일 안에서 계산) */
   hdfPlan: HdfPlan;
+  /** 출력 전체 기준 마이크로 할레이션 (HDF core 와 같은 규칙으로 타일 안에서 계산) */
+  mhPlan: MhPlan;
   atm: Vec3;
 }
 
@@ -184,7 +191,7 @@ export class RenderGraph {
       pass: "normalize", target: out, size: R,
       v2: { uDstSize: [R.width, R.height], uSrcSize: [srcSize.width, srcSize.height], uTileOrigin: [0, 0], uImageSize: [R.width, R.height] },
       i: { uOrient: orient, uProfile: n.profile, uLimitedCV: n.limitedCV, uSrcLutN: n.srcLut?.N ?? 2, uSrcLutInVR: n.srcLut?.inVR ?? false, uSrcLutOutVR: n.srcLut?.outVR ?? false, uSamsungFix: n.samsungFix, uRgc: n.rgc, uRolloff: n.rolloff },
-      f: { uRawScale: n.rawScale, uExpGain: c.s.uExpGain },
+      f: { uRawScale: n.rawScale, uExpGain: c.s.uExpGain, uRollW: c.isp.uRollW },
       m3: { uSrcToWS: n.srcToWS, uWB: n.wb },
       tex: { uSrc: srcTex, uToneInv: this.toneInvTex, uSrcLut: n.srcLut?.tex ?? null },
     });
@@ -209,14 +216,7 @@ export class RenderGraph {
       this.draw({ pass: "down2", target: t, size: S, iv2: { uInSize: [prev.width, prev.height] }, tex: { uIn: prev } });
       levels.push(t);
     }
-    const blur = (lv: { level: number; sigmaN: number; radius: number }, out: Target) => {
-      const src = levels[lv.level - 1]!;
-      const S = { width: src.width, height: src.height };
-      const tmp = this.pool.acquire(S.width, S.height, "rgba16f");
-      this.draw({ pass: "gauss", target: tmp, size: S, iv2: { uInSize: [S.width, S.height], uDir: [1, 0] }, f: { uSigma: lv.sigmaN }, i: { uRadius: lv.radius }, tex: { uIn: src } });
-      this.draw({ pass: "gauss", target: out, size: S, iv2: { uInSize: [S.width, S.height], uDir: [0, 1] }, f: { uSigma: lv.sigmaN }, i: { uRadius: lv.radius }, tex: { uIn: tmp } });
-      this.pool.release(tmp);
-    };
+    const blur = (lv: { level: number; sigmaN: number; radius: number }, out: Target) => this.gauss2(levels[lv.level - 1]!, out, lv.sigmaN, lv.radius);
     const cs = levelSize(R, plan.core.level);
     const core = this.pool.acquire(cs.width, cs.height, "rgba16f");
     blur(plan.core, core);
@@ -228,6 +228,33 @@ export class RenderGraph {
     }
     for (const t of levels) this.pool.release(t);
     return { core, halo };
+  }
+
+  /** 분리 가우시안 (fs_gauss 가로 → 세로) */
+  private gauss2(src: Target, out: Target, sigma: number, radius: number): void {
+    const S = { width: src.width, height: src.height };
+    const tmp = this.pool.acquire(S.width, S.height, "rgba16f");
+    this.draw({ pass: "gauss", target: tmp, size: S, iv2: { uInSize: [S.width, S.height], uDir: [1, 0] }, f: { uSigma: sigma }, i: { uRadius: radius }, tex: { uIn: src } });
+    this.draw({ pass: "gauss", target: out, size: S, iv2: { uInSize: [S.width, S.height], uDir: [0, 1] }, f: { uSigma: sigma }, i: { uRadius: radius }, tex: { uIn: tmp } });
+    this.pool.release(tmp);
+  }
+
+  /** FSE-v2 §5-3 마이크로 할레이션: 반 해상도 emitMh 추출(ℓ=1) → fs_down2 로 ℓ 까지 → σℓ 분리 가우시안. uIspMh > 0 일 때만 */
+  private mh(ws: Target, R: Size, plan: MhPlan): Target {
+    const L1 = levelSize(R, 1);
+    let cur = this.pool.acquire(L1.width, L1.height, "rgba16f");
+    this.draw({ pass: "mh_extract", target: cur, size: L1, iv2: { uWSSize: [R.width, R.height] }, tex: { uWS: ws }, v2: { uDstSize: [L1.width, L1.height] } });
+    for (let n = 2; n <= plan.level; n++) {
+      const S = levelSize(R, n);
+      const t = this.pool.acquire(S.width, S.height, "rgba16f");
+      this.draw({ pass: "down2", target: t, size: S, iv2: { uInSize: [cur.width, cur.height] }, tex: { uIn: cur } });
+      this.pool.release(cur);
+      cur = t;
+    }
+    const out = this.pool.acquire(cur.width, cur.height, "rgba16f");
+    this.gauss2(cur, out, plan.sigmaL, plan.radius);
+    this.pool.release(cur);
+    return out;
   }
 
   /** 자기 가이드 필터: (p, p²) 입력 → box(r) → gf_ab(ε) → box(r) → out */
@@ -277,6 +304,8 @@ export class RenderGraph {
       this.drop("tHalo");
       this.persist.tHalo = halo;
     } else this.drop("tHalo");
+    // 2b. 마이크로 할레이션 (ISP, HDF 와 별개)
+    const mhT = c.isp.uIspMh > 0 ? this.mh(ws, R, c.mhPlan) : null;
     // 3. 디헤이즈
     let atm = atmReq.value;
     let dzA: Target | null = null;
@@ -327,9 +356,10 @@ export class RenderGraph {
     } else this.drop("tToneAB");
     // 5. main
     const main = this.pool.acquire(R.width, R.height, "rgba16f");
-    this.mainPass(c, main, R, ws, core, halo, trans, toneAB, atm, [0, 0], R);
+    this.mainPass(c, main, R, ws, core, halo, trans, toneAB, atm, [0, 0], R, mhT);
     this.pool.release(ws);
     if (core) this.pool.release(core);
+    if (mhT) this.pool.release(mhT);
     // 6. 명료도
     let clarAB: Target | null = null;
     if (c.s.uClarity !== 0) {
@@ -403,15 +433,19 @@ export class RenderGraph {
     return { width: A.width, height: A.height, data: px };
   }
 
-  private mainPass(c: ChainParams, out: Target, size: Size, ws: Target, core: Target | null, halo: Target | null, trans: Target | null, toneAB: Target | null, atm: Vec3, tileOrigin: [number, number], imageSize: Size): void {
+  private mainPass(c: ChainParams, out: Target, size: Size, ws: Target, core: Target | null, halo: Target | null, trans: Target | null, toneAB: Target | null, atm: Vec3, tileOrigin: [number, number], imageSize: Size, mhT: Target | null): void {
     const L = c.lut;
+    const q = c.isp;
     this.draw(this.merge(this.lib(c, core, halo, trans, atm, size, tileOrigin, imageSize), {
       pass: "main", target: out, size,
-      i: { uToneOps: c.toneOps, uLutMode: L.mode, uLutN: L.N, uLutDomain: L.domain, uLutInVR: L.inVR, uLutOutVR: L.outVR },
-      f: { uSh: c.s.uSh, uHi: c.s.uHi, uWh: c.s.uWh, uBk: c.s.uBk, uBr: c.s.uBr, uLb: c.s.uLb, uCt: c.s.uCt, uVig: c.s.uVig, uFilmStrength: c.s.uFilmStrength },
-      v3: { uLutDomMin: L.min, uLutDomMax: L.max },
+      i: { uToneOps: c.toneOps, uLutMode: L.mode, uLutN: L.N, uLutDomain: L.domain, uLutInVR: L.inVR, uLutOutVR: L.outVR, uSceneRef: q.uSceneRef },
+      f: {
+        uSh: c.s.uSh, uHi: c.s.uHi, uWh: c.s.uWh, uBk: c.s.uBk, uBr: c.s.uBr, uLb: c.s.uLb, uCt: c.s.uCt, uVig: c.s.uVig, uFilmStrength: c.s.uFilmStrength,
+        uIspSd: q.uIspSd, uIspPop: q.uIspPop, uIspHd: q.uIspHd, uDrStops: q.uDrStops, uIspMh: mhT ? q.uIspMh : 0,
+      },
+      v3: { uLutDomMin: L.min, uLutDomMax: L.max, uIspMhTint: q.uIspMhTint },
       m3: { uWsToSG3C: c.wsToSG3C },
-      tex: { uWS: ws, uToneAB: toneAB, uLut: L.tex },
+      tex: { uWS: ws, uToneAB: toneAB, uLut: L.tex, uMH: mhT },
     }));
   }
 
@@ -424,8 +458,9 @@ export class RenderGraph {
     }));
   }
 
+  /** S12 blurL: 선명도 또는 ES 광학 윤곽 완화(uIspEs)가 켜져 있으면 계산 */
   private sharpenBlur(c: ChainParams, post: Target, size: Size): Target | null {
-    if (!(c.s.uSharpen > 0)) return null;
+    if (!(c.s.uSharpen > 0 || c.isp.uIspEs > 0)) return null;
     const h = this.pool.acquire(size.width, size.height, "r16f");
     const out = this.pool.acquire(size.width, size.height, "r16f");
     this.draw({ pass: "blurL", target: h, size, iv2: { uInSize: [size.width, size.height], uDir: [1, 0] }, i: { uChan: 3 }, tex: { uIn: post } });
@@ -438,7 +473,7 @@ export class RenderGraph {
     this.draw({
       pass: "final", target, size,
       v2: { uDstSize: [size.width, size.height], uGrainOff: c.grain.off, uCropOrigin: o.crop, uImgPxOrigin: o.imgPxOrigin, uTileOrigin: [0, 0], uImageSize: [size.width, size.height] },
-      f: { uSharpen: c.s.uSharpen, uGrainAmt: c.s.uGrainAmt, uGrainScale: c.grain.scale },
+      f: { uSharpen: c.s.uSharpen, uIspEs: c.isp.uIspEs, uGrainAmt: c.s.uGrainAmt, uGrainScale: c.grain.scale },
       i: { uDither: o.dither, uFlipY: o.flipY, uOutConv: target === null && this.outputSpace === "display-p3" },
       m3: { uOutM: srgbToP3Uniform() },
       tex: { uPost: post, uBlurL: blurL },
@@ -454,10 +489,12 @@ export class RenderGraph {
     this.normalize(c, R, srcTex, srcSize, 1, ws);
     let core: Target | null = null;
     if (c.hdf) core = this.hdf(c, ws, R, t.hdfPlan, false).core;
+    const mhT = c.isp.uIspMh > 0 ? this.mh(ws, R, t.mhPlan) : null;
     const main = this.pool.acquire(R.width, R.height, "rgba16f");
-    this.mainPass(c, main, R, ws, core, this.persist.tHalo, this.persist.tTrans, this.persist.tToneAB, t.atm, t.tileOrigin, t.imageSize);
+    this.mainPass(c, main, R, ws, core, this.persist.tHalo, this.persist.tTrans, this.persist.tToneAB, t.atm, t.tileOrigin, t.imageSize, mhT);
     this.pool.release(ws);
     if (core) this.pool.release(core);
+    if (mhT) this.pool.release(mhT);
     const post = this.pool.acquire(R.width, R.height, "rgba16f");
     this.postPass(c, post, R, main, this.persist.tClarAB, t.tileOrigin, t.imageSize);
     this.pool.release(main);
