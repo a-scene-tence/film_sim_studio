@@ -19,7 +19,7 @@ function Card({ rows }: { rows: Array<[string, string]> }) {
   );
 }
 
-export function ExifInspector({ open, onClose, asset, file, demo }: { open: boolean; onClose(): void; asset: MediaAsset | null; file: File | null; demo: boolean }) {
+export function ExifInspector({ open, onClose, asset, file }: { open: boolean; onClose(): void; asset: MediaAsset | null; file: File | null }) {
   const [q, setQ] = useState("");
   const [tags, setTags] = useState<Record<string, unknown> | null>(null);
   const [video, setVideo] = useState<VideoMetaInfo | null>(null);
@@ -43,7 +43,7 @@ export function ExifInspector({ open, onClose, asset, file, demo }: { open: bool
     return gs.map((g) => ({ ...g, rows: needle ? g.rows.filter((r) => r.key.toLowerCase().includes(needle) || r.value.toLowerCase().includes(needle)) : g.rows })).filter((g) => g.rows.length > 0);
   }, [asset, needle]);
 
-  const title = <>EXIF{demo ? <span className="rounded-full bg-[var(--panel-2)] px-2 py-0.5 text-[11px] text-[var(--accent)]">데모</span> : null}</>;
+  const title = <>EXIF</>;
 
   let body: React.ReactNode = null;
   if (asset && asset.kind === "video" && asset.video) {

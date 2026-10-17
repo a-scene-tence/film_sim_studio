@@ -40,8 +40,8 @@ describe("새 미디어 열기 = 완전 초기화", () => {
   });
   it("Studio.openFile: 이전 필름을 이어받지 않고 비교·스포이트를 끄고 히스토리를 초기화한다", () => {
     const src = readFileSync(new URL("../src/components/studio/Studio.tsx", import.meta.url), "utf8");
-    const body = src.slice(src.indexOf("const openFile = useCallback"), src.indexOf("const openDemo = useCallback"));
-    expect(body).toContain('histDispatch({ type: "reset", snap: { edit: mediaOpenState(demo), choice: "auto" } })');
+    const body = src.slice(src.indexOf("const openFile = useCallback"), src.indexOf("// ── 썸네일"));
+    expect(body).toContain('histDispatch({ type: "reset", snap: { edit: mediaOpenState(false), choice: "auto" } })');
     expect(body).toContain("setCompare(false)");
     expect(body).toContain("setPicking(false)");
     expect(body).not.toContain("state.simId");

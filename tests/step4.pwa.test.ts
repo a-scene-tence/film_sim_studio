@@ -125,11 +125,11 @@ describe("T22 정적 라우팅 회귀 (check-export)", () => {
     const demo = Buffer.concat([Buffer.from([0xff, 0xd8]), Buffer.from("Exif\0\0FILM LAB"), Buffer.alloc(120000, 1)]);
     pub["demo/demo-scene.jpg"] = demo;
     for (const [k, v] of Object.entries(pub)) { put(p, join("public", k), v); put(p, join("out", k), v); }
-    if (opts.index) put(p, "out/index.html", "<html/>");
+    if (opts.index) put(p, "out/index.html", '<html><head><link rel="manifest" href="/manifest.webmanifest"/><meta name="apple-mobile-web-app-capable" content="yes"/><meta name="mobile-web-app-capable" content="yes"/><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/><meta name="viewport" content="viewport-fit=cover"/><link rel="apple-touch-icon" href="/i.png"/></head></html>');
     put(p, "out/lab/renderer.html", "<html/>");
     put(p, "out/404.html", "<html/>");
     put(p, "out/manifest.webmanifest", JSON.stringify({
-      name: "Film Lab", short_name: "Film Lab", start_url: "/", scope: "/", display: "standalone", background_color: "#0b0b0c", theme_color: "#0b0b0c",
+      name: "Film Lab", short_name: "Film Lab", start_url: "/", scope: "/", display: "standalone", background_color: "#09090b", theme_color: "#09090b",
       icons: [{ src: "/icons/icon-192.png" }, { src: "/icons/icon-512.png" }, { src: "/icons/icon-maskable-512.png", purpose: "maskable" }],
     }));
     const files = ["/", "/404", "/manifest.webmanifest", "/luts/manifest.json", "/demo/demo-scene.jpg", "/icons/icon-192.png", "/vendor/jsquash-jpeg/1.6.0/mozjpeg_enc.wasm", ...Array.from({ length: 32 }, (_, i) => `/luts/bin/s${i}.bin`)];
@@ -149,5 +149,22 @@ describe("T22 정적 라우팅 회귀 (check-export)", () => {
   });
   it("프로젝트 자체 public/ 의 필수 자산이 존재한다", () => {
     for (const f of ["demo/demo-scene.jpg", "icons/icon-192.png", "icons/icon-512.png", "icons/icon-maskable-512.png", "icons/apple-touch-icon.png", "luts/manifest.json"]) expect(existsSync(join("public", f))).toBe(true);
+  });
+});
+
+describe("standalone PWA 메타 · 데모 버튼 제거 (빌드 산출물)", () => {
+  const html = existsSync("out/index.html") ? readFileSync("out/index.html", "utf8") : null;
+  it.skipIf(html === null)("out/index.html 에 standalone 태그가 있다", () => {
+    expect(html).toContain('rel="manifest"');
+    expect(html).toContain('name="apple-mobile-web-app-capable" content="yes"');
+    expect(html).toContain('name="mobile-web-app-capable" content="yes"');
+    expect(html).toContain('name="apple-mobile-web-app-status-bar-style" content="black-translucent"');
+    expect(html).toContain("viewport-fit=cover");
+    expect(html).toContain('rel="apple-touch-icon"');
+  });
+  it("시작 화면 소스에 데모 버튼이 없다", () => {
+    const src = readFileSync("src/components/studio/EmptyState.tsx", "utf8");
+    expect(src).not.toContain("데모");
+    expect(src).not.toContain("onDemo");
   });
 });
