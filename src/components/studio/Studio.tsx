@@ -37,7 +37,6 @@ import { FilmTab } from "./tabs/FilmTab";
 import { LightTab } from "./tabs/LightTab";
 import { ToastView, useToastQueue } from "./Toast";
 
-const DEMO_URL = "/demo/demo-scene.jpg";
 
 /** 로더 단계 문구 끝의 말줄임표를 없앤다 */
 const stripEllipsis = (s: string) => s.replace(/(…|\.{2,})\s*$/u, "");
@@ -58,7 +57,6 @@ export default function Studio() {
   const [sims, setSims] = useState<SimInfo[]>([]);
   const [asset, setAsset] = useState<MediaAsset | null>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [isDemo, setIsDemo] = useState(false);
   const [loading, setLoading] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>("film");
   const [profileOpen, setProfileOpen] = useState(false);
@@ -155,7 +153,7 @@ export default function Studio() {
   const mono = simRecipe(state.simId, sims).mono;
 
   // ── 미디어 열기 ──────────────────────────────────────────────────────────
-  const openFile = useCallback(async (f: File, demo = false) => {
+  const openFile = useCallback(async (f: File) => {
     if (!renderer) return;
     const seq = ++loadSeq.current;
     setLoading("파일 확인 중");
@@ -168,16 +166,14 @@ export default function Studio() {
       } else renderer.setPhotoSource(a);
       setAsset(a);
       setFile(f);
-      setIsDemo(demo);
       appliedChoice.current = "auto";
       setThumbs({});
       // 새 미디어 = 완전 초기화: 필름·모든 슬라이더·HDF·톤 커브(mediaOpenState), 원본 비교·WB 스포이트 끔,
       // 히스토리는 "초기 상태" 1개만 남긴다. 줌/팬은 Preview 가 asset.id 변경 시 1× 로 되돌린다.
       setCompare(false);
       setPicking(false);
-      histDispatch({ type: "reset", snap: { edit: mediaOpenState(demo), choice: "auto" } });
-      if (demo) toast("데모 사진입니다. 32종 필름 · HDF · 그레인 · 커브를 자유롭게 바꿔 보세요");
-      else if (a.warnings.length > 0) toast(a.warnings[0]!);
+      histDispatch({ type: "reset", snap: { edit: mediaOpenState(false), choice: "auto" } });
+      if (a.warnings.length > 0) toast(a.warnings[0]!);
       if (!hintShown.current) {
         hintShown.current = true;
         const hint = nextInstallHint(installPrompt.current);
@@ -189,19 +185,6 @@ export default function Studio() {
       if (seq === loadSeq.current) setLoading(null);
     }
   }, [renderer, toast]);
-
-  const openDemo = useCallback(async () => {
-    setLoading("데모 사진 불러오는 중");
-    try {
-      const res = await fetch(DEMO_URL);
-      if (!res.ok) throw new Error(`데모 사진을 불러오지 못했습니다 (HTTP ${res.status}) — 네트워크 연결을 확인하고 다시 시도하세요`);
-      const blob = await res.blob();
-      await openFile(new File([blob], "demo-scene.jpg", { type: "image/jpeg", lastModified: Date.parse("2026-10-16T06:39:00+09:00") }), true);
-    } catch (e) {
-      setLoading(null);
-      toast(e instanceof Error ? e.message : String(e));
-    }
-  }, [openFile, toast]);
 
   // ── 썸네일 ───────────────────────────────────────────────────────────────
   const thumbsKey = asset && sims.length > 0 ? asset.id : null;
@@ -409,7 +392,7 @@ export default function Studio() {
       <div className="fixed inset-0 flex flex-col text-[var(--text)]" style={{ height: "100dvh", background: "var(--bg)", paddingLeft: "env(safe-area-inset-left)", paddingRight: "env(safe-area-inset-right)" }}>
         <Header
           onFile={(f) => void openFile(f)} accept={ACCEPT_FALLBACK} badge={badge} badgeDisabled={isRaw} approximate={binding?.approximate ?? false}
-          onBadge={() => setProfileOpen(true)} demo={isDemo} onExif={() => setExifOpen(true)} onSave={() => { setPauseSignal((n) => n + 1); setExportOpen(true); }}
+          onBadge={() => setProfileOpen(true)} onExif={() => setExifOpen(true)} onSave={() => { setPauseSignal((n) => n + 1); setExportOpen(true); }}
           hasMedia={asset !== null} busy={loading !== null || exporting}
           p3Available={p3Ok} outSpace={outSpace} onOutSpace={changeOutSpace}
           undoLabel={undoText} redoLabel={redoText} undoDepth={hist.past.length} onUndo={undo} onRedo={redo}
@@ -424,7 +407,7 @@ export default function Studio() {
             compare={compare} onCompare={setCompare} editKey={editKey} disabled={!asset || loading !== null} pauseVideoSignal={pauseSignal}
             picking={picking} onPick={onPick} pickMarker={pickMarker}
           >
-            {!asset && !loading ? <EmptyState busy={!renderer} onOpen={() => fileInput.current?.click()} onDemo={() => void openDemo()} onAbout={() => setAboutOpen(true)} /> : null}
+            {!asset && !loading ? <EmptyState busy={!renderer} onOpen={() => fileInput.current?.click()} onAbout={() => setAboutOpen(true)} /> : null}
             {loading ? (
               <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3" style={{ background: "rgba(0,0,0,0.6)" }} role="status" aria-live="polite">
                 <span className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--line)] border-t-[var(--accent)]" />
@@ -454,7 +437,7 @@ export default function Studio() {
           open={profileOpen} onClose={() => setProfileOpen(false)} current={choice} detection={asset?.detection ?? null} onSelect={(c) => void selectProfile(c)}
           onLutChanged={() => renderer?.refreshSourceLut()} onError={(m) => toast(m)}
         />
-        <ExifInspector key={asset?.id ?? "none"} open={exifOpen} onClose={() => setExifOpen(false)} asset={asset} file={file} demo={isDemo} />
+        <ExifInspector key={asset?.id ?? "none"} open={exifOpen} onClose={() => setExifOpen(false)} asset={asset} file={file} />
         <ExportModal
           open={exportOpen} onClose={() => setExportOpen(false)} asset={asset} file={file} simId={state.simId} simLabel={frameLabel} renderer={renderer} params={params} editKey={editKey}
           toast={toast} onRunningChange={onExportRunning}

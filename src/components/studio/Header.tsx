@@ -12,7 +12,6 @@ export interface HeaderProps {
   badgeDisabled: boolean;
   approximate: boolean;
   onBadge(): void;
-  demo: boolean;
   onExif(): void;
   onSave(): void;
   hasMedia: boolean;
@@ -43,7 +42,7 @@ const CAPSULE_BTN = "relative flex h-11 shrink-0 select-none items-center justif
 /**
  * 헤더 2단 구조 (Lightroom Mobile 스타일)
  * 1열 메인 액션 바: [열기] | 캡슐(↩ ↪ 🕘 ↺초기화) | [저장]  — 좌우 12px, 폭 100%, 저장은 shrink-0 로 고정
- * 2열 슬림 정보 바: [EXIF] [입력 색공간 배지] [P3/sRGB] [데모] — 넘치면 가로 스크롤 없이 배지만 줄어듦(truncate)
+ * 2열 슬림 정보 바: [EXIF] [입력 색공간 배지] [P3/sRGB] — 넘치면 가로 스크롤 없이 배지만 줄어듦(truncate)
  */
 export function Header(p: HeaderProps) {
   const input = useRef<HTMLInputElement>(null);
@@ -118,7 +117,6 @@ export function Header(p: HeaderProps) {
             </span>
           </button>
         ) : null}
-        {p.demo ? <span className="shrink-0 whitespace-nowrap rounded-full bg-[var(--panel-2)] px-2 py-0.5 text-[11px] text-[var(--accent)]">데모</span> : null}
       </div>
     </header>
   );

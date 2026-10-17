@@ -31,7 +31,7 @@ if (exists('demo/demo-scene.jpg')) {
 // 6) manifest.webmanifest 필수 필드
 if (exists('manifest.webmanifest')) {
   const m = JSON.parse(fs.readFileSync(path.join(OUT, 'manifest.webmanifest'), 'utf8'));
-  for (const [k, v] of [['name', 'Film Lab'], ['short_name', 'Film Lab'], ['start_url', '/'], ['scope', '/'], ['display', 'standalone'], ['background_color', '#0b0b0c'], ['theme_color', '#0b0b0c']]) if (m[k] !== v) errors.push('manifest.' + k + ' = ' + JSON.stringify(m[k]) + ' (expected ' + JSON.stringify(v) + ')');
+  for (const [k, v] of [['name', 'Film Lab'], ['short_name', 'Film Lab'], ['start_url', '/'], ['scope', '/'], ['display', 'standalone'], ['background_color', '#09090b'], ['theme_color', '#09090b']]) if (m[k] !== v) errors.push('manifest.' + k + ' = ' + JSON.stringify(m[k]) + ' (expected ' + JSON.stringify(v) + ')');
   const icons = Array.isArray(m.icons) ? m.icons : [];
   for (const src of ['/icons/icon-192.png', '/icons/icon-512.png', '/icons/icon-maskable-512.png']) if (!icons.some((i) => i.src === src)) errors.push('manifest icon missing: ' + src);
   if (!icons.some((i) => i.purpose === 'maskable')) errors.push('manifest has no maskable icon');
