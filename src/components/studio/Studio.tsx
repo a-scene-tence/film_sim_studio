@@ -407,7 +407,7 @@ export default function Studio() {
             compare={compare} onCompare={setCompare} editKey={editKey} disabled={!asset || loading !== null} pauseVideoSignal={pauseSignal}
             picking={picking} onPick={onPick} pickMarker={pickMarker}
           >
-            {!asset && !loading ? <EmptyState busy={!renderer} onOpen={() => fileInput.current?.click()} onAbout={() => setAboutOpen(true)} /> : null}
+            {!asset && !loading ? <EmptyState busy={!renderer} getInstallPrompt={() => installPrompt.current} onOpen={() => fileInput.current?.click()} onAbout={() => setAboutOpen(true)} /> : null}
             {loading ? (
               <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3" style={{ background: "rgba(0,0,0,0.6)" }} role="status" aria-live="polite">
                 <span className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--line)] border-t-[var(--accent)]" />
