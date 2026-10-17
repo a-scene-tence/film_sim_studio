@@ -575,7 +575,7 @@ export class FilmRenderer {
       curve: this.curve(),
       lut: this.lutUniforms(),
       wsToSG3C: colMajor(inv3(matrixToWS("s-gamut3-cine") as Mat3)),
-      grain: { scale: grainScalePreview(this.outShort(), Math.min(R.width, R.height), e.adjust.grainSize), off: grainOffset(seed), coarse: grainCoarse(e.adjust.grainSize) },
+      grain: { scale: grainScalePreview(this.outShort(), Math.min(R.width, R.height)), off: grainOffset(seed), coarse: grainCoarse(e.adjust.grainSize) },
       hdfPlan: hdfPlan(R),
       isp,
       mhPlan: mhPlan(R),
@@ -821,7 +821,7 @@ export class FilmRenderer {
         curve: curveOn(this.params.curve) ? this.curveTable : null,
         sat: s.uSat, vib: s.uVib, filmStrength: s.uFilmStrength, monoTint: s.uMonoTint,
         isp: (() => { const q = this.ispFor(1); return { drStops: q.uDrStops, sceneRef: q.uSceneRef, hd: q.uIspHd, drY0: q.uDrY0, drS: q.uDrS }; })(),
-        grain: s.uGrainAmt > 0 ? { amount: s.uGrainAmt, scale: grainScalePreview(this.outShort(), Math.min(R.width, R.height), e.adjust.grainSize), off: grainOffset(0), coarse: grainCoarse(e.adjust.grainSize) } : null,
+        grain: s.uGrainAmt > 0 ? { amount: s.uGrainAmt, scale: grainScalePreview(this.outShort(), Math.min(R.width, R.height)), off: grainOffset(0), coarse: grainCoarse(e.adjust.grainSize) } : null,
       };
       return { ctx, R };
     } finally {
@@ -859,7 +859,7 @@ export class FilmRenderer {
       const base = this.chainParams(this.lastR, outScale);
       const e = this.effective();
       base.R = Rt;
-      base.grain = { scale: grainScaleFull(Math.min(outFull.width, outFull.height), e.adjust.grainSize), off: grainOffset(0), coarse: grainCoarse(e.adjust.grainSize) };
+      base.grain = { scale: grainScaleFull(Math.min(outFull.width, outFull.height)), off: grainOffset(0), coarse: grainCoarse(e.adjust.grainSize) };
       const out = this.graph.renderTile({
         base, R: Rt, imageSize: outFull, tileOrigin: [px0, py0], crop: [rect.x - px0, rect.y - py0], imgPxOrigin: [rect.x, rect.y],
         out: { width: rect.width, height: rect.height }, hdfPlan: hdfPlan(outFull), mhPlan: mhPlan(outFull), atm: this.atm,

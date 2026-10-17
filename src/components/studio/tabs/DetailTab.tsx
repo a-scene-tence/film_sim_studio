@@ -1,5 +1,5 @@
 "use client";
-import { FUJI_GRAIN_PRESETS, matchFujiGrain } from "@/lib/render/grain";
+import { GRAIN_ROUGHNESS_AMOUNT, GRAIN_SIZE_VALUE, grainRoughnessOf, grainSizeChoiceOf } from "@/lib/render/grain";
 import { useStudio } from "../StudioContext";
 import { StateSlider } from "./common";
 
@@ -20,21 +20,36 @@ export function HdfSwitchRow() {
   );
 }
 
-/** 후지필름 그레인 이펙트: 거칠기(OFF/약/강) × 크기(소/대) 원터치. 아래 슬라이더로 미세 조절하면 선택 표시는 해제된다 */
-export function GrainPresetRow() {
+const segStyle = (on: boolean) => (on ? { background: "var(--accent)", color: "#0b0b0c", fontWeight: 700 } : { color: "var(--text-2)" });
+
+/** 후지필름 그레인 이펙트 메뉴와 같은 2단 스위치: 거칠기 OFF/약/강, 크기 소/대. 거칠기 슬라이더로 미세 조절하면 거칠기 선택 표시만 해제된다 */
+export function GrainSwitches() {
   const { state, dispatch, asset } = useStudio();
-  const cur = matchFujiGrain(state.grainAmount, state.grainSize);
+  const rough = grainRoughnessOf(state.grainAmount);
+  const size = grainSizeChoiceOf(state.grainSize);
   return (
     <div className={`flex flex-col gap-1 py-1 ${asset ? "" : "opacity-40"}`}>
-      <span className="text-[13px]">그레인 이펙트 (거칠기 · 크기)</span>
-      <div role="radiogroup" aria-label="그레인 이펙트" className="flex h-11 overflow-hidden rounded-[10px] border border-[var(--line)]">
-        {FUJI_GRAIN_PRESETS.map((g) => (
+      <span className="text-[13px]">그레인 이펙트 · 거칠기</span>
+      <div role="radiogroup" aria-label="그레인 거칠기" className="flex h-11 overflow-hidden rounded-[10px] border border-[var(--line)]">
+        {([["off", "OFF", 0], ["weak", "약 (Weak)", GRAIN_ROUGHNESS_AMOUNT.weak], ["strong", "강 (Strong)", GRAIN_ROUGHNESS_AMOUNT.strong]] as const).map(([id, label, amount]) => (
           <button
-            key={g.id} type="button" role="radio" aria-checked={cur === g.id} disabled={!asset}
-            className="flex-1 text-[13px]" style={cur === g.id ? { background: "var(--accent)", color: "#0b0b0c", fontWeight: 700 } : { color: "var(--text-2)" }}
-            onClick={() => dispatch({ type: "patch", values: { grainAmount: g.amount, grainSize: g.size } })}
+            key={id} type="button" role="radio" aria-checked={rough === id} disabled={!asset}
+            className="flex-1 text-[13px]" style={segStyle(rough === id)}
+            onClick={() => dispatch({ type: "set", key: "grainAmount", value: amount })}
           >
-            {g.label}
+            {label}
+          </button>
+        ))}
+      </div>
+      <span className="mt-1 text-[13px]">그레인 이펙트 · 크기</span>
+      <div role="radiogroup" aria-label="그레인 크기" className="flex h-11 overflow-hidden rounded-[10px] border border-[var(--line)]">
+        {([["small", "소 (Small)"], ["large", "대 (Large)"]] as const).map(([id, label]) => (
+          <button
+            key={id} type="button" role="radio" aria-checked={size === id} disabled={!asset}
+            className="flex-1 text-[13px]" style={segStyle(size === id)}
+            onClick={() => dispatch({ type: "set", key: "grainSize", value: GRAIN_SIZE_VALUE[id] })}
+          >
+            {label}
           </button>
         ))}
       </div>
@@ -51,9 +66,8 @@ export function DetailTab() {
       <StateSlider k="dehaze" />
       <HdfSwitchRow />
       <StateSlider k="hdfStrength" disabled={!state.hdf} />
-      <GrainPresetRow />
+      <GrainSwitches />
       <StateSlider k="grainAmount" />
-      <StateSlider k="grainSize" />
       <StateSlider k="vignette" />
     </div>
   );

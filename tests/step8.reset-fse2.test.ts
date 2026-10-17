@@ -49,8 +49,8 @@ describe("새 미디어 열기 = 완전 초기화", () => {
     const preview = readFileSync(new URL("../src/components/studio/Preview.tsx", import.meta.url), "utf8");
     expect(preview).toContain("useEffect(() => { zoomRef.current = ONE; queueMicrotask(() => setZoom(ONE)); }, [assetId]);");
   });
-  it("FSE-v2: 필름 선택은 그 필름의 프리셋 값으로 슬라이더를 채운다 (이전 '중립 고정' 동작 대체)", () => {
-    for (const P of FILM_SIMS) expect(selectFilm(initialEditState(), P.id).simId).toBe(P.id);
-    expect(selectFilm(initialEditState(), "fuji-classic-chrome").contrast).toBe(12);
+  it("필름 선택은 simId 만 바꾸고 슬라이더는 초기값 그대로", () => {
+    for (const P of FILM_SIMS) expect({ ...selectFilm(initialEditState(), P.id), simId: null }).toEqual(initialEditState());
+    expect(selectFilm(initialEditState(), "fuji-classic-chrome").contrast).toBe(0);
   });
 });

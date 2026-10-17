@@ -7,7 +7,7 @@ import { editReducer, initialEditState } from "../src/lib/studio/state";
 import { diffLabel, historyReducer, historyTimeline, initialHistory } from "../src/lib/studio/history";
 import { DR_SHOULDER, ispUniforms } from "../src/lib/render/isp";
 import { drShoulder } from "../src/lib/render/isp-ops";
-import { FUJI_GRAIN_PRESETS, GRAIN_CELL, matchFujiGrain } from "../src/lib/render/grain";
+import { FUJI_GRAIN_PRESETS, GRAIN_FLOOR, GRAIN_GAIN, GRAIN_ROUGHNESS_AMOUNT, GRAIN_SIZE_VALUE, grainRoughnessOf, grainSizeChoiceOf, matchFujiGrain } from "../src/lib/render/grain";
 import { grainNoise, pixelPipelineFromWs, type PixelCtx } from "../src/lib/render/reference";
 import { FS_MAIN_GLSL } from "../src/lib/render/glsl/fs_main";
 import { FS_FINAL_GLSL } from "../src/lib/render/glsl/fs_final";
@@ -240,30 +240,42 @@ describe("후지필름 그레인 이펙트", () => {
     expect(diffLabel({ edit: st, choice: "auto" }, { edit: a, choice: "auto" })).toBe("그레인");
     expect(diffLabel({ edit: a, choice: "auto" }, { edit: b, choice: "auto" })).toBe("그레인 강도");
   });
-  it("은염 입자 노이즈: 결정론 · 평균 0 · 표준편차 ≈ 0.26 · 이웃 픽셀 상관이 높다(부드러운 응집)", () => {
-    expect(grainNoise(10.5, 20.5, 1, [3, 4])).toBe(grainNoise(10.5, 20.5, 1, [3, 4]));
-    const N = 160, v = new Float64Array(N * N);
-    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) v[y * N + x] = grainNoise(x + 0.5, y + 0.5, 1, [3.3, 7.7], 0);
-    const mean = v.reduce((s, q) => s + q, 0) / v.length;
-    const varr = v.reduce((s, q) => s + (q - mean) ** 2, 0) / v.length;
-    expect(Math.abs(mean)).toBeLessThan(0.03);
-    expect(Math.sqrt(varr)).toBeGreaterThan(0.2); expect(Math.sqrt(varr)).toBeLessThan(0.32);
-    let c = 0;
-    for (let y = 0; y < N; y++) for (let x = 0; x < N - 1; x++) c += (v[y * N + x]! - mean) * (v[y * N + x + 1]! - mean);
-    expect(c / (N * (N - 1)) / varr).toBeGreaterThan(0.5); // 픽셀 단위 salt-and-pepper 는 ≈ 0
-    // 크기 대(scale 2.5)는 더 응집
-    let c2 = 0;
-    const w = new Float64Array(N * N);
-    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) w[y * N + x] = grainNoise(x + 0.5, y + 0.5, 2.5, [3.3, 7.7], 1);
-    const m2 = w.reduce((s, q) => s + q, 0) / w.length, v2 = w.reduce((s, q) => s + (q - m2) ** 2, 0) / w.length;
-    for (let y = 0; y < N; y++) for (let x = 0; x < N - 1; x++) c2 += (w[y * N + x]! - m2) * (w[y * N + x + 1]! - m2);
-    expect(c2 / (N * (N - 1)) / v2).toBeGreaterThan(c / (N * (N - 1)) / varr);
+  it("거칠기 OFF/약/강 × 크기 소/대 스위치 값 매핑", () => {
+    expect(GRAIN_ROUGHNESS_AMOUNT).toEqual({ weak: 35, strong: 70 });
+    expect(GRAIN_SIZE_VALUE).toEqual({ small: 0, large: 100 });
+    expect([0, 35, 70, 50].map(grainRoughnessOf)).toEqual(["off", "weak", "strong", null]);
+    expect([0, 100, 49, 50].map(grainSizeChoiceOf)).toEqual(["small", "large", "small", "large"]);
   });
-  it("셰이더: 값 노이즈 + quintic 보간, 심플렉스 snoise 없음, GRAIN_CELL 주입", () => {
-    expect(FS_FINAL_GLSL).toContain("float valueNoise(vec2 q, uint seed)");
-    expect(FS_FINAL_GLSL).toContain("t * t * t * (t * (t * 6.0 - 15.0) + 10.0)");
-    expect(FS_FINAL_GLSL).toContain(`px / (uGrainScale * ${GRAIN_CELL})`);
-    expect(FS_FINAL_GLSL).not.toContain("snoise");
-    expect(FS_FINAL_GLSL).toContain("v = clamp(v + 0.205 * (uGrainAmt / 100.0) * resp * n, 0.0, 1.0);");
+  it("은염 입자 노이즈: 결정론 · 평균 0 · 표준편차 ≈ 1 (소/대 동일) · 소는 픽셀 단위로 바삭하고 대는 3×3 안에서만 응집한다", () => {
+    expect(grainNoise(10.5, 20.5, 1, [3, 4])).toBe(grainNoise(10.5, 20.5, 1, [3, 4]));
+    const N = 200;
+    const stats = (coarse: number) => {
+      const v = new Float64Array(N * N);
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) v[y * N + x] = grainNoise(x + 0.5, y + 0.5, 1, [3.3, 7.7], coarse);
+      const mean = v.reduce((s, q) => s + q, 0) / v.length;
+      const varr = v.reduce((s, q) => s + (q - mean) ** 2, 0) / v.length;
+      let c1 = 0, c2 = 0;
+      for (let y = 0; y < N; y++) for (let x = 0; x < N - 2; x++) { c1 += (v[y * N + x]! - mean) * (v[y * N + x + 1]! - mean); c2 += (v[y * N + x]! - mean) * (v[y * N + x + 2]! - mean); }
+      const k = N * (N - 2) * varr;
+      return { mean, std: Math.sqrt(varr), lag1: c1 / k, lag2: c2 / k };
+    };
+    const small = stats(0), large = stats(1);
+    for (const st of [small, large]) { expect(Math.abs(st.mean)).toBeLessThan(0.05); expect(st.std).toBeGreaterThan(0.9); expect(st.std).toBeLessThan(1.1); }
+    expect(small.lag1).toBeLessThan(0.3); // 고주파 백색 입자 (소): 이웃과 거의 무상관
+    expect(Math.abs(small.lag2)).toBeLessThan(0.05);
+    expect(large.lag1).toBeGreaterThan(small.lag1 + 0.15); // 대: 3×3 클러스터로 조밀하게 응집
+    expect(large.lag2).toBeLessThan(0.2); // 하지만 반경 2px 밖에서는 상관이 사라진다 (구름 얼룩 없음)
+  });
+  it("진폭: 계수 0.06, 중간톤 최대 · 하이라이트/암부에서는 바닥값으로 묻힌다", () => {
+    expect(GRAIN_GAIN).toBe(0.06);
+    expect(GRAIN_FLOOR).toBe(0.2);
+  });
+  it("셰이더: 격자 보간 값 노이즈 없음, 셀 삼각 PDF + 소 커널/3×3 클러스터, 상수 주입", () => {
+    expect(FS_FINAL_GLSL).toContain("float cellTri(ivec2 c, uint seed)");
+    expect(FS_FINAL_GLSL).toContain("float fineGrain(ivec2 c)");
+    expect(FS_FINAL_GLSL).toContain("float clusterGrain(ivec2 c)");
+    expect(FS_FINAL_GLSL).toContain("ivec2 gc = ivec2(floor(px / uGrainScale + uGrainOff));");
+    for (const gone of ["snoise", "valueNoise", "latticeHash"]) expect(FS_FINAL_GLSL).not.toContain(gone);
+    expect(FS_FINAL_GLSL).toContain(`v = clamp(v + ${GRAIN_GAIN} * (uGrainAmt / 100.0) * resp * n, 0.0, 1.0);`);
   });
 });

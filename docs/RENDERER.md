@@ -137,10 +137,10 @@ S14 디더·출력
 - D = L − blur, D' = sign(D)·max(|D|−0.004, 0)
 - L' = L + (Sh/100)·1.2·D', Sh ∈ [0,150]
 ### 5.15 S13 은염 클럼핑 그레인
-- 격자 해시(pcg3d) 값 노이즈 + quintic 보간, n 정의는 COLOR_SCIENCE §16.13 (구 심플렉스 snoise 폐기)
-- 루미넌스 마스크 b(vl) = 0.4 + 0.6·sqrt(4·vl·(1−vl)), vl = luma709(v) (바닥값 0.4)
-- v' = clamp(v + 0.205·(A/100)·b·n)  (n 은 큰 입자 옥타브 포함, §16.13)
-- q = 이미지 픽셀 중심 좌표/(scale·GRAIN_CELL) + off
+- 픽셀 격자 삼각 PDF 백색 노이즈(pcg3d) + 소 커널(중심 70%·4방향 30%) / 대 3×3 클러스터 55% 중첩, n 정의는 COLOR_SCIENCE §16.13 (저주파 보간 노이즈 폐기)
+- 루미넌스 마스크 b(vl) = 0.2 + 0.8·4·vl·(1−vl), vl = luma709(v) (중간톤 최대, 바닥값 0.2)
+- v' = clamp(v + 0.06·(A/100)·b·n)  (n 표준편차 1, §16.13)
+- 셀 c = floor(이미지 픽셀 중심 좌표/scale + off)
 ### 5.16 S14 디더
 - pcg3d 해시
 - v8 = round(clamp(v + (n1+n2−1)/255)·255), n1 = pcg3d(x,y,0).x/2³², n2 = pcg3d(x,y,1).x/2³²
@@ -217,8 +217,8 @@ S14 디더·출력
    - 비디오: 섹션 10.6
 5. 그레인 유니폼
    - outShort = 출력 이미지 짧은 변(사진 displaySize, 비디오 표시 크기, 타일 = 내보내기 출력 크기)
-   - scale = max(0.25, outShort/1080)·mul(Sz) (mul: 0→1.0, 50→1.65, 100→2.5), uGrainCoarse = Sz/100 (COLOR_SCIENCE §11)
-   - 미리보기 f = outShort/R_short, uGrainScale = max(0.5, scale/f). 타일은 uGrainScale = scale.
+   - scale = max(1, outShort/1080), uGrainCoarse = Sz/100 (COLOR_SCIENCE §11)
+   - 미리보기 f = outShort/R_short, uGrainScale = max(1, scale/f). 타일은 uGrainScale = scale.
    - seed: 사진 0, 비디오 round(mediaTime·fps)
    - uGrainOff = (frac(seed·0.754877666)·1000, frac(seed·0.569840291)·1000) (CPU double 로 계산)
 6. HDF 유니폼

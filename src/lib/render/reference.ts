@@ -7,7 +7,7 @@ import { encodeLutInput } from "../color/fse/lut-domain.mjs";
 import { tetraSample } from "../color/fse/tetra.mjs";
 import * as T from "../color/source/transfer.mjs";
 import { sampleCurve } from "./curve";
-import { GRAIN_CELL } from "./grain";
+import { GRAIN_CLUSTER_MIX, GRAIN_CLUSTER_STD, GRAIN_FINE_STD, GRAIN_FLOOR, GRAIN_GAIN, GRAIN_TRI_NORM, GRAIN_W_CENTER, GRAIN_W_NEIGHBOR } from "./grain";
 import { drShoulder, edgeSoftenL, filmShoulder, hdOp, rolloffW, zoneShadowPop } from "./isp-ops";
 import { apply3, type Mat3 } from "./wb";
 
@@ -284,41 +284,43 @@ export function sharpenL(L: number, blur: number, Sh: number, es = 0): number {
   return edgeSoftenL(L + (Sh / 100) * 1.2 * Dp, D, es);
 }
 
-// ── S13 그레인 (격자 해시 값 노이즈 + quintic 보간, docs/COLOR_SCIENCE.md §16.13) ──
-/** 격자점 해시 → [−1, 1). pcg3d 정수 해시라 GPU(uvec3)와 같은 값 */
-function latticeHash(ix: number, iy: number, seed: number): number {
-  return (pcg3d(ix >>> 0, iy >>> 0, seed)[0] / 4294967296) * 2 - 1;
+// ── S13 그레인 (픽셀 격자 삼각 PDF 백색 노이즈 + 짧은 커널, docs/COLOR_SCIENCE.md §16.13) ──
+/** 셀 (ix, iy) 의 삼각 PDF 노이즈, 표준편차 1. pcg3d 의 x, y 두 성분을 균등난수 2개로 쓴다 (GPU 와 같은 값) */
+export function cellTri(ix: number, iy: number, seed: number): number {
+  const h = pcg3d(ix >>> 0, iy >>> 0, seed);
+  return (h[0] / 4294967296 + h[1] / 4294967296 - 1) * GRAIN_TRI_NORM;
 }
-const quintic = (t: number) => t * t * t * (t * (t * 6 - 15) + 10);
 
-/** 격자 해시 값 노이즈 (quintic 보간 = C2 연속, 가장자리가 부드러운 입자). 값 범위 [−1, 1] */
-export function valueNoise(qx: number, qy: number, seed: number): number {
-  const fx = Math.floor(qx), fy = Math.floor(qy);
-  const tx = quintic(qx - fx), ty = quintic(qy - fy);
-  const a = latticeHash(fx, fy, seed), b = latticeHash(fx + 1, fy, seed);
-  const c = latticeHash(fx, fy + 1, seed), d = latticeHash(fx + 1, fy + 1, seed);
-  return a + (b - a) * tx + (c - a) * ty + (a - b - c + d) * tx * ty;
+/** 소 커널: 중심 70% + 상하좌우 4셀 각 7.5%, 표준편차 1 로 정규화 */
+function fineGrain(cx: number, cy: number): number {
+  const s = GRAIN_W_CENTER * cellTri(cx, cy, 0)
+    + GRAIN_W_NEIGHBOR * (cellTri(cx - 1, cy, 0) + cellTri(cx + 1, cy, 0) + cellTri(cx, cy - 1, 0) + cellTri(cx, cy + 1, 0));
+  return s / GRAIN_FINE_STD;
+}
+
+/** 대 클러스터: 독립 노이즈(seed 1)의 3×3 가중합 [1 2 1; 2 4 2; 1 2 1]/16, 표준편차 1 로 정규화 */
+function clusterGrain(cx: number, cy: number): number {
+  let s = 0;
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) s += (2 - Math.abs(dx)) * (2 - Math.abs(dy)) * cellTri(cx + dx, cy + dy, 1);
+  return s / 16 / GRAIN_CLUSTER_STD;
 }
 
 /**
- * 섹션 5.15 은염 입자 n — px = 이미지 픽셀 중심 좌표
- * q = px/(scale·GRAIN_CELL) + off. 세 옥타브 값 노이즈(기본 + 2.03배 미세 + coarse 가중 0.5배 큰 입자)를 합친 뒤,
- * 저주파 변조로 입자가 군집(clumping)하게 한다. 색 성분 없이 스칼라 하나(루미넌스 농도 변조).
+ * 섹션 5.15 은염 입자 n — px = 이미지 픽셀 중심 좌표, 셀 = floor(px/scale + off)
+ * coarse = 0 (크기 소): 고주파 미세 입자만. coarse = 1 (크기 대): 미세 45% + 3×3 클러스터 55% 를 중첩 (표준편차 1 로 재정규화).
+ * 저주파 격자 보간이 없으므로 입자를 키워도 흐린 얼룩이 생기지 않는다. 색 성분 없이 스칼라 하나(루미넌스 농도 변조).
  */
 export function grainNoise(pxX: number, pxY: number, scale: number, off: [number, number], coarse = 0): number {
-  const qx = pxX / (scale * GRAIN_CELL) + off[0], qy = pxY / (scale * GRAIN_CELL) + off[1];
-  const n = 0.62 * valueNoise(qx, qy, 0) + 0.26 * valueNoise(qx * 2.03 + 17.13, qy * 2.03 + 41.71, 1) + 0.5 * coarse * valueNoise(qx * 0.5 + 29.3, qy * 0.5 + 5.9, 2);
-  return 1.25 * n * (0.65 + 0.35 * valueNoise(qx * 0.37 + 3.7, qy * 0.37 + 9.1, 3));
+  const cx = Math.floor(pxX / scale + off[0]), cy = Math.floor(pxY / scale + off[1]);
+  const f = fineGrain(cx, cy);
+  if (coarse <= 0) return f;
+  const wc = GRAIN_CLUSTER_MIX * coarse, wf = 1 - wc;
+  return (wf * f + wc * clusterGrain(cx, cy)) / Math.sqrt(wf * wf + wc * wc);
 }
-
-/** 그레인 최종 강도 계수 (구 0.07 의 약 2.93배) */
-export const GRAIN_GAIN = 0.205;
-/** 루미넌스 마스크 바닥값: 하이라이트·암부에서도 그레인이 이 비율 아래로 죽지 않는다 */
-export const GRAIN_FLOOR = 0.4
 
 export function grainApply(v: ArrayLike<number>, amount: number, n: number): Vec3 {
   const vl = dot(LUMA, v);
-  const resp = GRAIN_FLOOR + (1 - GRAIN_FLOOR) * Math.sqrt(Math.max(4 * vl * (1 - vl), 0));
+  const resp = GRAIN_FLOOR + (1 - GRAIN_FLOOR) * Math.max(4 * vl * (1 - vl), 0);
   return map3(v, (x) => clamp01(x + GRAIN_GAIN * (amount / 100) * resp * n));
 }
 

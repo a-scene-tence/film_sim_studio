@@ -1,7 +1,7 @@
 "use client";
 import { useRef } from "react";
 import type { OutputSpace } from "@/lib/render/output-space";
-import { IconHistory, IconInfo, IconOpen, IconRedo, IconUndo } from "./icons";
+import { IconHistory, IconInfo, IconOpen, IconRedo, IconResetAll, IconUndo } from "./icons";
 
 export const ACCEPT_FALLBACK = "image/*,video/*,.dng,.arw,.cr2,.cr3,.nef,.raf,.orf,.rw2,.pef,.srw,.heic,.heif,.mov,.mp4,.webm";
 
@@ -30,6 +30,9 @@ export interface HeaderProps {
   onRedo?(): void;
   /** 단계 기록 버튼(한 번 탭): 히스토리 타임라인 열기 */
   onTimeline?(): void;
+  /** 전체 초기화: 현재 편집 상태가 초기 상태와 다를 때만 활성 */
+  resetAllEnabled?: boolean;
+  onResetAll?(): void;
   /** 기록된 전체 단계 수 (뱃지, 초기 상태 제외) */
   historyCount?: number;
 }
@@ -89,6 +92,13 @@ export function Header(p: HeaderProps) {
         {(p.historyCount ?? 0) > 0 ? (
           <span className="absolute right-0.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--panel-2)] px-1 text-[10px] font-bold leading-none text-[var(--text)]">{p.historyCount}</span>
         ) : null}
+      </button>
+      <button
+        type="button" aria-label="전체 초기화" title="전체 초기화" disabled={!p.hasMedia || p.busy || !p.resetAllEnabled}
+        className="flex h-11 w-11 shrink-0 items-center justify-center text-[var(--text)] transition-opacity disabled:opacity-30"
+        style={{ touchAction: "manipulation" }} onClick={p.onResetAll}
+      >
+        <IconResetAll />
       </button>
       <button type="button" aria-label="EXIF 정보" disabled={!p.hasMedia} className="flex h-11 w-11 items-center justify-center text-[var(--text)] disabled:opacity-40" onClick={p.onExif}><IconInfo /></button>
       <button type="button" disabled={!p.hasMedia || p.busy} className="flex h-11 shrink-0 items-center disabled:opacity-40" onClick={p.onSave}>
