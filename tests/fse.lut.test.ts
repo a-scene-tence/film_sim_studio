@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LUT_SIZE } from "@/lib/color/fse/constants.mjs";
-import { renderPoint, shaperDec, shaperEnc, srgbDec, toneCoeffs, toneInv } from "@/lib/color/fse/engine.mjs";
+import { shaperDec, shaperEnc, srgbDec, toneInv } from "@/lib/color/fse/engine.mjs";
+import { renderPoint2, SIMS2 } from "../scripts/fse2-kernel.mjs";
 import { FILM_SIMS } from "@/lib/color/fse/film-params.mjs";
 import { tetraSample } from "@/lib/color/fse/tetra.mjs";
 import { decodeBinLut } from "@/lib/lut/binLut";
@@ -32,10 +33,10 @@ const toWs = (c: number[]): [number, number, number] => [
   toneInv(srgbDec(c[2]! / 255)),
 ];
 
-function maxErr(lut: Float32Array, p: (typeof FILM_SIMS)[number], k: ReturnType<typeof toneCoeffs>, x: [number, number, number]) {
+function maxErr(lut: Float32Array, id: string, x: [number, number, number]) {
   const a = tetraSample(lut, N, [shaperEnc(x[0]), shaperEnc(x[1]), shaperEnc(x[2])]);
-  const b = renderPoint(x, p, k);
-  return Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2]));
+  const b = renderPoint2(x, SIMS2[id as keyof typeof SIMS2]) as number[];
+  return Math.max(Math.abs(a[0] - b[0]!), Math.abs(a[1] - b[1]!), Math.abs(a[2] - b[2]!));
 }
 
 const PATCHES = [
@@ -65,19 +66,18 @@ describe("§7 tetraSample", () => {
   });
 });
 
-describe("생성된 .bin vs renderPoint", () => {
-  it.each(FILM_SIMS.map((p) => [p.id, p] as const))("%s: ColorChecker 24 최대오차 ≤ 0.02, 무작위 4096색 p95 ≤ 0.016", (id, p) => {
+describe("생성된 .bin vs renderPoint2 (FSE-v2)", () => {
+  it.each(FILM_SIMS.map((p) => [p.id, p] as const))("%s: ColorChecker 24 최대오차 ≤ 0.02, 무작위 4096색 p95 ≤ 0.016", (id) => {
     const lut = loadBin(id);
-    const k = toneCoeffs(p.tone);
     let worst = 0;
-    for (const c of PATCHES) worst = Math.max(worst, maxErr(lut, p, k, toWs(c)));
+    for (const c of PATCHES) worst = Math.max(worst, maxErr(lut, id, toWs(c)));
     expect(worst).toBeLessThanOrEqual(0.02);
 
     const rnd = mulberry32(777);
     const errs: number[] = [];
     for (let i = 0; i < 4096; i++) {
       const c = [Math.round(rnd() * 255), Math.round(rnd() * 255), Math.round(rnd() * 255)];
-      errs.push(maxErr(lut, p, k, toWs(c)));
+      errs.push(maxErr(lut, id, toWs(c)));
     }
     errs.sort((a, b) => a - b);
     const p95 = errs[Math.ceil(0.95 * errs.length) - 1]!;

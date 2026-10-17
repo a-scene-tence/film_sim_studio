@@ -10,6 +10,18 @@ void main() {
 }
 `;
 
+// FSE-v2 §5-7-2 마이크로 할레이션 추출 — 지시서 원문 그대로.
+export const FS_MH_EXTRACT_GLSL = `// ===== fs_mh_extract : micro-halation emitters at half resolution =====
+uniform sampler2D uWS;
+uniform ivec2 uWSSize;
+out vec4 outColor;
+vec3 em(ivec2 q) { return emitMh(texelFetch(uWS, min(q, uWSSize - 1), 0).rgb); }
+void main() {
+  ivec2 s = ivec2(gl_FragCoord.xy) * 2;
+  outColor = vec4(0.25 * (em(s) + em(s + ivec2(1, 0)) + em(s + ivec2(0, 1)) + em(s + ivec2(1, 1))), 1.0);
+}
+`;
+
 export const FS_DOWN2_GLSL = `// ===== fs_down2 : exact 2x2 box =====
 uniform sampler2D uIn;
 uniform ivec2 uInSize;

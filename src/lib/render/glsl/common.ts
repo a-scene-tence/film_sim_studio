@@ -1,4 +1,6 @@
 // docs/RENDERER.md 섹션 6 common.glsl — 글자 그대로 옮긴 정본. 수정 금지.
+// 예외(FSE-v2 수치 안전): gamutMap 의 tanh 인자를 15 로 묶는다. float32 에서 tanh(15) = 1.0 이라 결과는 같고,
+// L ≈ 1 에서 r 이 아주 작을 때 exp 기반 GPU tanh 가 inf/inf = NaN 이 되어 회색 점이 생기던 문제를 막는다.
 export const COMMON_GLSL = `// ===== common.glsl (FSE-v1 Step 3) =====
 const float DEG = 0.017453292519943295;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
@@ -53,7 +55,7 @@ vec3 gamutMap(vec3 lab) {
     if (inGamut(oklabToLin(vec3(L, dir * m)))) lo = m; else hi = m;
   }
   float t = 0.85 * lo; float Co = C;
-  if (C > t) { float r = lo - t; Co = r > 1e-9 ? t + r * tanh((C - t) / r) : t; }
+  if (C > t) { float r = lo - t; Co = r > 1e-9 ? t + r * tanh(min((C - t) / r, 15.0)) : t; }
   return clamp(oklabToLin(vec3(L, dir * Co)), 0.0, 1.0);
 }
 vec3 lutTetra(sampler3D lut, int N, vec3 u) {

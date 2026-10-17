@@ -228,7 +228,8 @@ S14 디더·출력
    - 레벨·반경은 섹션 5.6 식
 7. uWsToSG3C = (Step 2 의 S-Gamut3.Cine→709 행렬)의 역행렬
 
-## 9. 원터치 마스터 레시피 (src/lib/render/recipes.ts)
+## 9. 원터치 마스터 레시피 (src/lib/render/recipes.ts) — FSE-v2 로 대체됨
+> **FSE-v2 로 대체됨**: 숨은 레시피 레이어·중립 RECIPES 표·shaderHints 는 삭제되었다. 필름별 빛·톤·질감은 src/lib/render/film-presets.ts 프리셋이 슬라이더 값으로 담당하고(COLOR_SCIENCE §20), 렌더러에는 카메라 ISP 6단계(COLOR_SCIENCE §19, 패스 `mh_extract` 추가로 프래그먼트 17개)가 더해졌다. 아래는 기록용이다.
 ### 9.1 원칙
 - 실기 SOOC 의 공장 기본 설정을 표로 고정한다: 그레인 끔, 컬러 크롬 끔, FX 블루 끔, 하이라이트/섀도 톤 0, 샤프니스 0 의 JPEG 엔진 기본 선명화.
 - 톤과 색 성격은 FSE-v2 LUT 가 전담한다. 레시피는 모든 시뮬레이션에서 중립(0/끔)이다(COLOR_SCIENCE §15, 이중 적용 금지).

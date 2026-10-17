@@ -93,6 +93,7 @@ export function diffLabel(from: Snap, to: Snap): string {
   if (from.choice !== to.choice) names.push("입력 색공간");
   for (const sp of SLIDERS) if (getValue(from.edit, sp.key) !== getValue(to.edit, sp.key)) names.push(sp.label);
   if (from.edit.hdf !== to.edit.hdf) names.push("HDF");
+  if (from.edit.dRange !== to.edit.dRange) names.push("D레인지");
   if (JSON.stringify(from.edit.curve.points) !== JSON.stringify(to.edit.curve.points)) names.push("톤 커브");
   if (names.length === 0) return "변경";
   return names.length === 1 ? names[0]! : `${names[0]} 외 ${names.length - 1}개`;

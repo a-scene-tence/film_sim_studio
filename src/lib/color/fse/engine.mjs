@@ -1,6 +1,6 @@
-// FSE-v2 필름 엔진 — docs/COLOR_SCIENCE.md §1, §2, §5, §6 를 연산 순서·반복 횟수 그대로 구현한다.
-// FSE-v1 → v2 (사용자 승인): 톤 소프트 니(§6.1a), 피부톤 보호 대역·채도 감쇠 창(§6.4), 스플릿 톤 끝단 중립 수렴(§6.5).
-// 이후 수식 변경도 사용자 승인 후 버전을 올려서만 한다 (CLAUDE.md §0).
+// 앱 공용 색 수학 — docs/COLOR_SCIENCE.md §1, §2, §5, §6.1~§6.6 (T_ref 톤, 셰이퍼, OKLab, gamutMap, Tref⁻¹).
+// 필름 색 커널(FSE-v2)은 scripts/fse2-kernel.mjs 에만 있다(Node 생성기 전용, 앱 번들 미포함).
+// 수식 변경은 사용자 승인 후 버전을 올려서만 한다 (CLAUDE.md §0).
 
 import {
   MID_IN,
@@ -13,46 +13,21 @@ import {
   MAXCHROMA_ITERS,
   TONE_INV_ITERS,
   REF_TONE,
-  KNEE_TOE_L0,
-  KNEE_TOE_L1,
-  KNEE_SHOULDER_L,
-  KNEE_AMOUNT,
-  DESAT_SHOULDER_L0,
-  DESAT_TOE_L0,
-  DESAT_TOE_L1,
-  SKIN_HUE,
-  SKIN_HUE_EDGE,
-  SKIN_L,
-  SKIN_L_EDGE,
-  SKIN_C,
-  SKIN_C_EDGE,
-  SKIN_PROTECT,
-  SPLIT_BLACK_L,
-  SPLIT_WHITE_L,
 } from "./constants.mjs";
 
 /** @typedef {[number, number, number]} Vec3 */
 /** @typedef {{ a: number, d: number, hdrMax: number, midOut: number }} ToneParams */
 /** @typedef {{ a: number, d: number, hdrMax: number, midOut: number, ad: number, b: number, c: number }} ToneCoeffs */
 /**
+ * FSE-v2 필름 메타데이터 (색 파라미터는 scripts/fse2-kernel.mjs SIMS2)
  * @typedef {object} FilmSim
  * @property {string} id
  * @property {"fujifilm" | "ricoh"} brand
  * @property {string} ko
  * @property {string} en
  * @property {boolean} mono
- * @property {ToneParams} tone
- * @property {number} [sat]
- * @property {ReadonlyArray<ReadonlyArray<number>>} [hue]
- * @property {ReadonlyArray<number>} [desat]
- * @property {ReadonlyArray<number>} [mixer]
- * @property {{ shadow: ReadonlyArray<number>, highlight: ReadonlyArray<number> } | null} split
- * @property {ReadonlyArray<number> | null} tint
- * @property {ReadonlyArray<number>} fade
- * @property {Readonly<Record<string, unknown>>} shaderHints
  */
 
-const DEG = Math.PI / 180;
 
 /** §1 @param {number} x @param {number} a @param {number} b */
 export function clamp(x, a, b) {
@@ -114,40 +89,6 @@ export function tone(x, k = REF_K) {
   if (x <= 0) return 0;
   if (x >= k.hdrMax) return 1;
   return Math.min(1, Math.pow(x, k.a) / (Math.pow(x, k.ad) * k.b + k.c));
-}
-
-/**
- * §6.1a 필름 톤 + 소프트 니 — 기준 톤의 OKLab L(lr = cbrt(y_ref)) 이 섀도 끝(< KNEE_TOE_L1)·하이라이트 끝(> KNEE_SHOULDER_L) 이면
- * 필름 톤을 T_ref 쪽으로 되돌린다. SDR 입력은 T_ref 로 정규화되어 있으므로 원본 이상의 블랙 크러시·하이라이트 클립을 만들지 않는다.
- * @param {number} x
- * @param {ToneCoeffs} k 필름 톤 계수
- */
-export function filmTone(x, k) {
-  const yf = tone(x, k);
-  if (k === REF_K) return yf;
-  const yr = tone(x, REF_K);
-  const lr = Math.cbrt(yr);
-  const w = KNEE_AMOUNT * Math.max(1 - smoothstep(KNEE_TOE_L0, KNEE_TOE_L1, lr), smoothstep(KNEE_SHOULDER_L, 1, lr));
-  return yf + (yr - yf) * w;
-}
-
-/**
- * §6.4 피부톤 보호 가중치 wS ∈ [0,1] (OKLCh 색상 h°, L, C)
- * @param {number} h
- * @param {number} L
- * @param {number} C
- */
-export function skinWeight(h, L, C) {
-  const H0 = /** @type {number} */ (SKIN_HUE[0]);
-  const H1 = /** @type {number} */ (SKIN_HUE[1]);
-  const L0 = /** @type {number} */ (SKIN_L[0]);
-  const L1 = /** @type {number} */ (SKIN_L[1]);
-  const C0 = /** @type {number} */ (SKIN_C[0]);
-  const C1 = /** @type {number} */ (SKIN_C[1]);
-  const wh = smoothstep(H0 - SKIN_HUE_EDGE, H0, h) * (1 - smoothstep(H1, H1 + SKIN_HUE_EDGE, h));
-  const wl = smoothstep(L0 - SKIN_L_EDGE, L0, L) * (1 - smoothstep(L1, L1 + SKIN_L_EDGE, L));
-  const wcs = smoothstep(C0 - SKIN_C_EDGE, C0, C) * (1 - smoothstep(C1, C1 + SKIN_C_EDGE, C));
-  return wh * wl * wcs;
 }
 
 /**
@@ -280,99 +221,4 @@ export function hueWeights(h) {
   let sum = 0;
   for (const v of raw) sum += v;
   return raw.map((v) => v / sum);
-}
-
-/**
- * §6.5 splitTone + tint (L 은 변경하지 않는다)
- * @param {FilmSim} P
- * @param {number} L
- * @param {number} a
- * @param {number} b
- * @returns {[number, number]}
- */
-function splitAndTint(P, L, a, b) {
-  if (P.split !== null) {
-    const sh = /** @type {number} */ (P.split.shadow[0]);
-    const sc = /** @type {number} */ (P.split.shadow[1]);
-    const hh = /** @type {number} */ (P.split.highlight[0]);
-    const hc = /** @type {number} */ (P.split.highlight[1]);
-    const ms = (1 - smoothstep(0.15, 0.55, L)) * smoothstep(0, SPLIT_BLACK_L, L);
-    const mh = smoothstep(0.45, 0.95, L) * (1 - smoothstep(SPLIT_WHITE_L, 1.0, L));
-    a += sc * Math.cos(sh * DEG) * ms + hc * Math.cos(hh * DEG) * mh;
-    b += sc * Math.sin(sh * DEG) * ms + hc * Math.sin(hh * DEG) * mh;
-  }
-  if (P.tint !== null) {
-    const th = /** @type {number} */ (P.tint[0]);
-    const tc = /** @type {number} */ (P.tint[1]);
-    const m = smoothstep(0, 0.25, L) * (1 - smoothstep(0.85, 1.0, L));
-    a += tc * Math.cos(th * DEG) * m;
-    b += tc * Math.sin(th * DEG) * m;
-  }
-  return [a, b];
-}
-
-/**
- * §6 renderPoint — WS 선형(≥0) → sRGB 인코딩 [0,1]³
- * @param {ArrayLike<number>} x
- * @param {FilmSim} P
- * @param {ToneCoeffs} k toneCoeffs(P.tone)
- * @returns {Vec3}
- */
-export function renderPoint(x, P, k) {
-  const x0 = /** @type {number} */ (x[0]);
-  const x1 = /** @type {number} */ (x[1]);
-  const x2 = /** @type {number} */ (x[2]);
-  let L;
-  let a;
-  let b;
-  if (P.mono) {
-    const mx = /** @type {ReadonlyArray<number>} */ (P.mixer);
-    const Y = /** @type {number} */ (mx[0]) * x0 + /** @type {number} */ (mx[1]) * x1 + /** @type {number} */ (mx[2]) * x2;
-    const y = filmTone(Y, k);
-    [L, a, b] = linToOklab([y, y, y]);
-  } else {
-    [L, a, b] = linToOklab([filmTone(x0, k), filmTone(x1, k), filmTone(x2, k)]);
-    // §6.4 colorOps
-    const hue = /** @type {ReadonlyArray<ReadonlyArray<number>>} */ (P.hue);
-    const desat = /** @type {ReadonlyArray<number>} */ (P.desat);
-    const sat = /** @type {number} */ (P.sat);
-    const C = Math.hypot(a, b);
-    let h = Math.atan2(b, a) / DEG;
-    if (h < 0) h += 360;
-    const w = hueWeights(h);
-    let dh = 0;
-    let g = 0;
-    let dl = 0;
-    for (let i = 0; i < w.length; i++) {
-      const wi = /** @type {number} */ (w[i]);
-      const row = /** @type {ReadonlyArray<number>} */ (hue[i]);
-      dh += wi * /** @type {number} */ (row[0]);
-      g += wi * /** @type {number} */ (row[1]);
-      dl += wi * /** @type {number} */ (row[2]);
-    }
-    const wc = smoothstep(0, 0.06, C);
-    const p = 1 - SKIN_PROTECT * skinWeight(h, L, C);
-    const G0 = g * sat;
-    const G = G0 > 1 ? 1 + (G0 - 1) * p : G0;
-    const h2 = h + dh * p * wc;
-    const C2 = Math.max(
-      0,
-      C *
-        G *
-        (1 - /** @type {number} */ (desat[0]) * smoothstep(DESAT_SHOULDER_L0, 1.0, L)) *
-        (1 - /** @type {number} */ (desat[1]) * (1 - smoothstep(DESAT_TOE_L0, DESAT_TOE_L1, L))),
-    );
-    L = L + dl * p * wc;
-    a = C2 * Math.cos(h2 * DEG);
-    b = C2 * Math.sin(h2 * DEG);
-  }
-  [a, b] = splitAndTint(P, L, a, b);
-  const rgb = gamutMap(L, a, b);
-  const f0 = /** @type {number} */ (P.fade[0]);
-  const f1 = /** @type {number} */ (P.fade[1]);
-  return [
-    clamp(f0 + (f1 - f0) * srgbEnc(rgb[0]), 0, 1),
-    clamp(f0 + (f1 - f0) * srgbEnc(rgb[1]), 0, 1),
-    clamp(f0 + (f1 - f0) * srgbEnc(rgb[2]), 0, 1),
-  ];
 }

@@ -1,6 +1,6 @@
-// 섹션 9.3 실효값 — 사용자 슬라이더 + 레시피(숨은 레이어) → 셰이더 전달 값.
+// 섹션 9.3 실효값 — 사용자 슬라이더 → 셰이더 전달 값. FSE-v2: 숨은 레시피 레이어 없음(필름 프리셋은 슬라이더 값 자체).
 import { LINEAR_CURVE, type CurveState } from "./curve";
-import { recipeFor, recipeGrain } from "./recipes";
+import type { DRange } from "./isp";
 
 export type AdjustKey =
   | "exposure" | "lightBalance" | "brightness" | "contrast" | "highlights" | "shadows" | "whites" | "blacks"
@@ -69,6 +69,8 @@ export interface RenderParams {
   /** Step 4 §5-6: 흑백 조색 색상 0..359° / 강도 0..100 */
   monoHue: number;
   monoAmount: number;
+  /** FSE-v2 §5-1 D레인지 100/200/400 (drStops 0/1/2, uRollW) */
+  dRange: DRange;
   /**
    * Step 4 스튜디오 모드: true 면 adjust·cce·fxb·hdf 가 이미 레시피 값을 포함한 절대값이라 숨은 레시피 레이어를 더하지 않는다
    * (selectSim 이 연동 키를 슬라이더에 복사하므로 이중 적용 금지). false(기본) 는 Step 3 동작 그대로.
@@ -78,7 +80,7 @@ export interface RenderParams {
 
 export const DEFAULT_PARAMS: RenderParams = {
   sim: "none", lookLutId: null, sourceLutId: null, adjust: ZERO_ADJUST, cce: "recipe", fxb: "recipe", hdf: "recipe", curve: LINEAR_CURVE, iso: null,
-  filmStrength: 100, hdfStrength: 100, monoHue: 0, monoAmount: 0, absolute: false,
+  filmStrength: 100, hdfStrength: 100, monoHue: 0, monoAmount: 0, dRange: 100, absolute: false,
 };
 
 export interface Effective {
@@ -95,38 +97,16 @@ export interface Effective {
 
 const clampTo = (k: AdjustKey, v: number) => Math.min(SLIDER_RANGE[k][1], Math.max(SLIDER_RANGE[k][0], v));
 
-/** 실효 수치 = clamp(사용자 + 레시피, 범위). grainSize = 사용자 > 0 ? 사용자 : 레시피. 흑백은 cce·fxb = 0 */
+/** 실효 수치 = clamp(사용자 값, 범위). "recipe" 는 FSE-v2 에서 0 / 끔. 흑백은 cce·fxb = 0 */
 export function effectiveParams(p: RenderParams, mono: boolean): Effective {
   const extra = {
     filmStrength: p.filmStrength / 100,
     hdfK: p.hdfStrength / 100,
     monoTint: monoTintUniform(mono, p.monoHue, p.monoAmount),
   };
-  if (p.absolute) {
-    const lv = (v: "recipe" | Level): Level => (v === "recipe" ? 0 : v);
-    return { adjust: { ...p.adjust }, cce: mono ? 0 : lv(p.cce), fxb: mono ? 0 : lv(p.fxb), hdf: p.hdf === "recipe" ? false : p.hdf, mono, ...extra };
-  }
-  const rc = recipeFor(p.sim);
-  const g = recipeGrain(rc, p.iso);
-  const u = p.adjust;
-  const adjust: Adjust = {
-    ...u,
-    sharpen: clampTo("sharpen", u.sharpen + rc.sharpen),
-    clarity: clampTo("clarity", u.clarity + rc.clarity),
-    highlights: clampTo("highlights", u.highlights + rc.highlights),
-    shadows: clampTo("shadows", u.shadows + rc.shadows),
-    vignette: clampTo("vignette", u.vignette + rc.vignette),
-    grainAmount: clampTo("grainAmount", u.grainAmount + g.amount),
-    grainSize: u.grainSize > 0 ? u.grainSize : g.size,
-  };
-  return {
-    adjust,
-    cce: mono ? 0 : p.cce === "recipe" ? rc.cce : p.cce,
-    fxb: mono ? 0 : p.fxb === "recipe" ? rc.fxb : p.fxb,
-    hdf: p.hdf === "recipe" ? rc.hdf : p.hdf,
-    mono,
-    ...extra,
-  };
+  const lv = (v: "recipe" | Level): Level => (v === "recipe" ? 0 : v);
+  const adjust = p.absolute ? { ...p.adjust } : (Object.fromEntries((Object.keys(p.adjust) as AdjustKey[]).map((k) => [k, clampTo(k, p.adjust[k])])) as Adjust);
+  return { adjust, cce: mono ? 0 : lv(p.cce), fxb: mono ? 0 : lv(p.fxb), hdf: p.hdf === "recipe" ? false : p.hdf, mono, ...extra };
 }
 
 /** Step 4 §5-6 uMonoTint: 흑백 필름이고 monoAmount > 0 이면 (C·cos h, C·sin h), C = 0.06·amount/100, h = hue·π/180 */

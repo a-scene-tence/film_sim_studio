@@ -1,4 +1,4 @@
-// 섹션 15.2-6: 섹션 4.2-8 조립 규칙대로 16개 프래그먼트 + 정점을 glslangValidator 로 컴파일한다.
+// 섹션 15.2-6: 섹션 4.2-8 조립 규칙대로 17개 프래그먼트 + 정점을 glslangValidator 로 컴파일한다.
 // npm 이 실행 권한 없이 설치하는 경우(EACCES) os.tmpdir() 사본에 chmod 755 를 준 뒤 실행한다(사용자 승인 사항).
 // 그래도 실행할 수 없으면(ENOENT, EACCES, 아키텍처 불일치) 사유를 출력하고 skip 한다.
 import { describe, expect, it } from "vitest";
@@ -48,8 +48,8 @@ describe.skipIf(!v.bin)("섹션 15.2-6 GLSL ES 3.00 컴파일", () => {
     expect(r.status, `${file}\n${r.stdout}${r.stderr}`).toBe(0);
   };
   it("정점 셰이더", () => compile("vs.vert", "vert", VS_GLSL));
-  it("프래그먼트 16개", () => {
-    expect(PASS_NAMES.length).toBe(16);
+  it("프래그먼트 17개 (FSE-v2 fs_mh_extract 포함)", () => {
+    expect(PASS_NAMES.length).toBe(17);
   });
   for (const p of PASS_NAMES) it(`fs_${p}`, () => compile(`fs_${p}.frag`, "frag", assembleFragment(p)));
 });

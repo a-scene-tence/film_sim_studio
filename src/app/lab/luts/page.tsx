@@ -26,7 +26,7 @@ interface ManifestSim {
   bin: string;
   sha256Cube: string;
   sha256Bin: string;
-  shaderHints: Record<string, unknown>;
+  engine: "FSE-v2";
 }
 
 interface Manifest {

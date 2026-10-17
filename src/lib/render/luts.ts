@@ -3,7 +3,7 @@ import { decodeBinLut } from "../lut/binLut";
 import { getLut, listLuts, type LutMeta } from "../lut/lutStore";
 import type { LutData, LutInputDomain } from "../lut/types";
 
-export interface ManifestSim { id: string; brand: "fujifilm" | "ricoh"; ko: string; en: string; mono: boolean; order: number; bin: string; sha256Bin: string }
+export interface ManifestSim { id: string; brand: "fujifilm" | "ricoh"; ko: string; en: string; mono: boolean; order: number; bin: string; sha256Bin: string; engine?: string }
 export interface LutManifest { size: number; sims: ManifestSim[] }
 
 let manifestPromise: Promise<LutManifest> | null = null;

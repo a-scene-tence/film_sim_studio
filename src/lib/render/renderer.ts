@@ -10,7 +10,8 @@ import { PASS_NAMES } from "./glsl";
 import { RenderGraph, type ChainParams, type HistPixels, type LutUniforms, type NormalizeUniforms } from "./graph";
 import { DOMAIN_INDEX, listStoreLuts, loadBuiltinLut, loadManifest, loadStoreLut, storeSourceProfile, type CpuLut, type LutManifest, type ManifestSim, type StoreLut } from "./luts";
 import { DEFAULT_PARAMS, effectiveParams, scalarUniforms, toneOpsOn, type Effective, type RenderParams } from "./params";
-import { grainOffset, grainScaleFull, grainScalePreview, hdfPlan, scaledSize, tilePadding, graphSizes, type Size } from "./plan";
+import { ispUniforms, type IspUniforms } from "./isp";
+import { grainOffset, grainScaleFull, grainScalePreview, hdfPlan, mhPlan, scaledSize, tilePadding, graphSizes, type Size } from "./plan";
 import type { LutStageRef, NormalizeCtx, PixelCtx } from "./reference";
 import { toneInvTable, TONE_INV_N } from "./tone-inv-table";
 import { probeVideoOrientation, type OrientationProbeResult } from "./video-orientation-probe";
@@ -23,7 +24,7 @@ export type { RendererCaps } from "./gl";
 const LOST_WARNING = "GPU 컨텍스트 손실 — 복구를 기다리는 중";
 export interface RenderStats { passes: number; cpuMs: number; R: { width: number; height: number } }
 
-/** 프로브 렌더 덮어쓰기: 공간 단계(HDF, 디헤이즈, 베이스 톤, 명료도, 선명도)를 끄고 그레인 강도를 지정 */
+/** 프로브 렌더 덮어쓰기: 공간 단계(HDF, 마이크로 할레이션, 디헤이즈, 베이스 톤·ZS·팝, 명료도, 선명도·ES)를 끄고 그레인 강도를 지정 */
 export interface ProbeOverride { grainAmount: number }
 
 interface GpuLut { cpu: CpuLut; tex: WebGLTexture; flags?: { inVR: boolean; outVR: boolean; min: Vec3; max: Vec3; domain: number; name: string } }
@@ -469,6 +470,7 @@ export class FilmRenderer {
       rolloff: b.rolloff,
       wb,
       expGain: scalarUniforms(e).uExpGain,
+      rollW: this.ispFor(1).uRollW,
     };
     const u: NormalizeUniforms = {
       profile, limitedCV: ctx.limitedCV, srcToWS: colMajor(srcToWS), rawScale: ctx.rawScale,
@@ -493,6 +495,28 @@ export class FilmRenderer {
       ...e, hdf: false,
       adjust: { ...e.adjust, dehaze: 0, shadows: 0, highlights: 0, whites: 0, blacks: 0, brightness: 0, lightBalance: 0, clarity: 0, sharpen: 0, grainAmount: o.grainAmount },
     };
+  }
+
+  /**
+   * FSE-v2 §5-6 카메라 ISP 유니폼. brand = 현재 필름의 브랜드(필름 없음 null), profile = 입력 바인딩 uProfile,
+   * renderScale = 이 렌더의 이미지 폭 / 풀해상도 표시 폭. 프로브는 공간 단계(MH, ZS·팝, ES)를 끈다.
+   */
+  private ispFor(renderScale: number): IspUniforms {
+    const a = this.asset;
+    const u = ispUniforms({
+      brand: this.simMeta()?.brand ?? null,
+      filmStrength: this.params.filmStrength,
+      dRange: this.params.dRange,
+      profile: a ? this.profileIndex(a.descriptor) : 0,
+      renderScale,
+    });
+    return this.probeOverride ? { ...u, uIspMh: 0, uIspSd: 0, uIspPop: 0, uIspEs: 0 } : u;
+  }
+
+  /** 미리보기·동영상 저장의 렌더 배율: 렌더 폭 / 표시 폭 */
+  private previewScale(R: Size): number {
+    const d = this.displaySize();
+    return d && d.width > 0 ? R.width / d.width : 1;
   }
 
   private curve(): { on: boolean; tex: WebGLTexture } {
@@ -533,10 +557,11 @@ export class FilmRenderer {
     return Math.max(d.width, d.height);
   }
 
-  private chainParams(R: Size): ChainParams {
+  private chainParams(R: Size, renderScale: number = this.previewScale(R)): ChainParams {
     const a = this.asset!;
     const e = this.effective();
     const s = scalarUniforms(e);
+    const isp = this.ispFor(renderScale);
     const seed = a.kind === "video" ? this.frameIndex : 0;
     return {
       mode: a.kind === "video" ? "video" : "photo",
@@ -544,7 +569,7 @@ export class FilmRenderer {
       src: { tex: this.srcTex!, size: this.srcSize!, orient: this.srcOrient },
       norm: this.normalizeUniforms(a.descriptor).u,
       s,
-      toneOps: toneOpsOn(e),
+      toneOps: toneOpsOn(e) || isp.uIspSd > 0 || isp.uIspPop > 0,
       hdf: e.hdf,
       mono: e.mono,
       curve: this.curve(),
@@ -552,6 +577,8 @@ export class FilmRenderer {
       wsToSG3C: colMajor(inv3(matrixToWS("s-gamut3-cine") as Mat3)),
       grain: { scale: grainScalePreview(this.outLong(), Math.max(R.width, R.height), e.adjust.grainSize), off: grainOffset(seed) },
       hdfPlan: hdfPlan(R),
+      isp,
+      mhPlan: mhPlan(R),
     };
   }
 
@@ -778,6 +805,7 @@ export class FilmRenderer {
         ct: s.uCt, vig: s.uVig, aspect: R.width / R.height, lut, mono: e.mono, ke: s.uKe, kb: s.uKb,
         curve: curveOn(this.params.curve) ? this.curveTable : null,
         sat: s.uSat, vib: s.uVib, filmStrength: s.uFilmStrength, monoTint: s.uMonoTint,
+        isp: (() => { const q = this.ispFor(1); return { drStops: q.uDrStops, sceneRef: q.uSceneRef, hd: q.uIspHd }; })(),
         grain: s.uGrainAmt > 0 ? { amount: s.uGrainAmt, scale: grainScalePreview(this.outLong(), Math.max(R.width, R.height), e.adjust.grainSize), off: grainOffset(0) } : null,
       };
       return { ctx, R };
@@ -812,13 +840,14 @@ export class FilmRenderer {
     const tex = createTex2D(gl, tile.width, tile.height, gl.RGBA16F, gl.RGBA, gl.FLOAT, gl.LINEAR, tile.data);
     try {
       const Rt = { width: px1 - px0, height: py1 - py0 };
-      const base = this.chainParams(this.lastR);
+      // 렌더 배율 = outScale (사진 저장 1, 확대 디테일 오버레이 s)
+      const base = this.chainParams(this.lastR, outScale);
       const e = this.effective();
       base.R = Rt;
       base.grain = { scale: grainScaleFull(Math.max(outFull.width, outFull.height), e.adjust.grainSize), off: grainOffset(0) };
       const out = this.graph.renderTile({
         base, R: Rt, imageSize: outFull, tileOrigin: [px0, py0], crop: [rect.x - px0, rect.y - py0], imgPxOrigin: [rect.x, rect.y],
-        out: { width: rect.width, height: rect.height }, hdfPlan: hdfPlan(outFull), atm: this.atm,
+        out: { width: rect.width, height: rect.height }, hdfPlan: hdfPlan(outFull), mhPlan: mhPlan(outFull), atm: this.atm,
       }, tex, { width: tile.width, height: tile.height });
       return new Uint8ClampedArray(out.buffer);
     } finally {

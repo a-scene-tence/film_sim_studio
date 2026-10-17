@@ -1,4 +1,4 @@
-// docs/RENDERER.md 섹션 6 fs_normalize.glsl — 정본. Step 4 §5-1 패치(uProfile 14 samsunglog)만 허용.
+// docs/RENDERER.md 섹션 6 fs_normalize.glsl — 정본. Step 4 §5-1 패치(uProfile 14 samsunglog), FSE-v2 §5-7-7 패치(uRollW, tanh 인자 15 가드 — 사용자 확정)만 허용.
 export const FS_NORMALIZE_GLSL = `// ===== fs_normalize : S0 source -> WS (+WB, exposure) =====
 uniform sampler2D uSrc;
 uniform vec2 uSrcSize;      // stored texture size
@@ -87,10 +87,11 @@ vec3 rgc(vec3 c) {
   vec3 cd = vec3(rgcCompress(d.r, 1.147, 0.815), rgcCompress(d.g, 1.264, 0.803), rgcCompress(d.b, 1.312, 0.880));
   return vec3(ach) - cd * ach;
 }
+uniform float uRollW;       // rolloff ceiling = 2.04 * 2^uDrStops (DR100 -> 2.04)
 vec3 rolloffY(vec3 x) {
   float Y = dot(LUMA, max(x, 0.0));
   if (Y <= 1.0) return x;
-  float Yp = 1.0 + (2.04 - 1.0) * tanh((Y - 1.0) / (2.04 - 1.0));
+  float Yp = 1.0 + (uRollW - 1.0) * tanh(min((Y - 1.0) / (uRollW - 1.0), 15.0));
   return x * (Yp / Y);
 }
 vec3 fetchDecoded(vec2 uvD) { return decodeToSrcLinear(texture(uSrc, orientUv(uvD, uOrient)).rgb); }

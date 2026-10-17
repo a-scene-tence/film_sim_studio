@@ -11,8 +11,8 @@ import { filmStrengthMix, originalEnc, postChroma } from "../src/lib/render/refe
 const close = (a: ArrayLike<number>, b: number[], tol: number) => b.forEach((v, i) => expect(Math.abs(a[i]! - v)).toBeLessThan(tol));
 
 describe("T5 셰이더 소스 패치 (Step 4 §5)", () => {
-  it("프래그먼트 16개 (fs_hist 포함)", () => {
-    expect(PASS_NAMES.length).toBe(16);
+  it("프래그먼트 17개 (fs_hist, fs_mh_extract 포함)", () => {
+    expect(PASS_NAMES.length).toBe(17);
     expect(PASS_NAMES).toContain("hist");
     expect(assembleFragment("hist")).toContain("outColor = vec4(texture(uIn, uvLocal()).rgb, 1.0);");
   });

@@ -9,7 +9,7 @@ import {
   validateRecipe, MAX_RECIPES, type Recipe, type StorageLike,
 } from "../src/lib/studio/recipes";
 import {
-  defaultFor, editReducer, formatValue, initialEditState, normalizeValue, selectSim, SLIDER_BY_KEY, SLIDERS, toCurveState, fromCurveState, type EditState, type SliderKey,
+  defaultFor, editReducer, formatValue, initialEditState, normalizeValue, selectFilm, SLIDER_BY_KEY, SLIDERS, toCurveState, fromCurveState, type EditState, type SliderKey,
 } from "../src/lib/studio/state";
 import { buildUniforms } from "../src/lib/studio/uniforms";
 import { CURVE_PRESETS } from "../src/lib/render/curve";
@@ -71,32 +71,21 @@ describe("T8 SLIDERS 표 · normalizeValue · buildUniforms", () => {
   });
 });
 
-describe("T9 selectSim / defaultFor (Step 4 §6-3)", () => {
-  it("FSE-v2: 필름 선택은 상세 조정 슬라이더를 건드리지 않는다 (이중 적용 금지)", () => {
-    let st: EditState = selectSim(initialEditState(), "fuji-provia");
-    expect({ ...st, simId: null }).toEqual(initialEditState());
-    st = editReducer(st, { type: "set", key: "grainAmount", value: 30 });
-    st = editReducer(st, { type: "set", key: "sharpness", value: 12 });
-    for (const id of ["ricoh-hi-contrast-bw", "ricoh-standard", "ricoh-hdr-tone", "ricoh-retro", "fuji-acros", "fuji-velvia", null]) {
-      st = selectSim(st, id, 3200);
-      expect(st.simId).toBe(id);
-      expect([st.grainAmount, st.grainSize, st.sharpness, st.clarity, st.shadows, st.highlights, st.vignette, st.cce, st.ccb, st.hdf]).toEqual([30, 0, 12, 0, 0, 0, 0, 0, 0, false]);
-    }
+describe("T9 selectFilm / defaultFor (FSE-v2 §6-3, 상세 골든은 tests/fse2.presets.test.ts)", () => {
+  it("필름 강도와 프리셋 밖 키는 그대로, 필름 없음은 중립", () => {
+    const st = { ...initialEditState(), filmStrength: 40, monoHue: 30 };
+    const n = selectFilm(st, "fuji-velvia");
+    expect([n.filmStrength, n.monoHue, n.simId, n.contrast]).toEqual([40, 30, "fuji-velvia", 18]);
+    expect(selectFilm(n, null).sharpness).toBe(0);
   });
-  it("필름 강도와 나머지 키는 그대로", () => {
-    const st = { ...initialEditState(), filmStrength: 40, exposure: 1.5 };
-    const n = selectSim(st, "fuji-velvia");
-    expect([n.filmStrength, n.exposure, n.simId]).toEqual([40, 1.5, "fuji-velvia"]);
-    expect(selectSim(n, null).sharpness).toBe(0);
-  });
-  it("defaultFor: 모든 필름에서 §6-2 기본값 (필름 강도·확산 강도는 100)", () => {
-    expect(defaultFor("sharpness", "ricoh-hard-monotone")).toBe(0);
+  it("defaultFor: 프리셋 값, 프리셋 밖 키는 §6-2 기본값 (필름 강도 100)", () => {
+    expect(defaultFor("sharpness", "ricoh-hard-monotone")).toBe(14);
     expect(defaultFor("sharpness", null)).toBe(0);
     expect(defaultFor("filmStrength", "fuji-provia")).toBe(100);
-    expect(defaultFor("hdfStrength", "ricoh-retro")).toBe(100);
+    expect(defaultFor("hdfStrength", "ricoh-retro")).toBe(50);
     expect(defaultFor("zone2", "ricoh-retro")).toBe(0);
-    expect(defaultFor("grainAmount", "fuji-acros", 3200)).toBe(0);
-    expect(defaultFor("clarity", "ricoh-hdr-tone")).toBe(0);
+    expect(defaultFor("grainAmount", "fuji-acros")).toBe(28);
+    expect(defaultFor("clarity", "ricoh-hdr-tone")).toBe(70);
   });
   it("커브: 프리셋 판별과 CurveState 왕복", () => {
     const c = editReducer(initialEditState(), { type: "curvePreset", preset: "matte" }).curve;
@@ -150,7 +139,7 @@ describe("T10 레시피", () => {
     return { m, getItem: (k) => m.get(k) ?? null, setItem: (k, v) => { m.set(k, v); } };
   };
   it("보내기 → 가져오기 왕복 동일성", () => {
-    let st: EditState = selectSim(initialEditState(), "ricoh-hdr-tone");
+    let st: EditState = selectFilm(initialEditState(), "ricoh-hdr-tone");
     st = { ...st, exposure: 0.35, saturation: -12, hdf: true, filmStrength: 80 };
     st = editReducer(st, { type: "curvePreset", preset: "strong-contrast" });
     const r = recipeFromState(st, "내 레시피", new Date("2026-10-16T06:39:00Z"));

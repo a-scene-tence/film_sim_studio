@@ -12,7 +12,7 @@ import { computeAuto } from "@/lib/render/auto";
 import { CURVE_PRESETS, CURVE_PRESET_LABEL, LINEAR_CURVE, type CurvePreset, type Zones } from "@/lib/render/curve";
 import { listStoreLuts, loadManifest, loadStoreLut, storeSourceProfile, type ManifestSim } from "@/lib/render/luts";
 import { ADJUST_SLIDERS, DEFAULT_PARAMS, effectiveParams, GRAIN_SLIDERS, isoFromSummary, type AdjustKey, type Level, type RenderParams } from "@/lib/render/params";
-import { RECIPES, recipeGrain } from "@/lib/render/recipes";
+import { FILM_PRESETS } from "@/lib/render/film-presets";
 import { FilmRenderer, type RendererInfo } from "@/lib/render/renderer";
 import { gpuCpuProbe, photoPerf, tileSeamCheck, videoPerf, type ProbeReport } from "@/lib/render/verify";
 
@@ -122,7 +122,7 @@ export default function RendererLab() {
   const sim = sims.find((s) => s.id === params.sim) ?? null;
   const mono = sim?.mono ?? false;
   const eff = useMemo(() => effectiveParams(params, mono), [params, mono]);
-  const recipe = RECIPES[params.sim];
+  const preset = FILM_PRESETS[params.sim] ?? null;
   const disp = asset ? (asset.kind === "video" && asset.video ? (asset.video.rotation.orientation >= 5 ? { w: asset.video.rotation.codedHeight, h: asset.video.rotation.codedWidth } : { w: asset.video.rotation.codedWidth, h: asset.video.rotation.codedHeight }) : { w: asset.displaySize.width, h: asset.displaySize.height }) : null;
 
   const setAdjust = (k: AdjustKey, v: number) => apply({ ...params, adjust: { ...params.adjust, [k]: v } });
@@ -254,9 +254,9 @@ export default function RendererLab() {
         <div className="flex gap-2 overflow-x-auto pb-1">
           {brandSims.map((s) => <button key={s.id} className={chip(params.sim === s.id && !params.lookLutId)} onClick={() => pickSim(s.id)}>{s.ko}</button>)}
         </div>
-        {recipe ? (
+        {preset ? (
           <p className="text-xs text-neutral-500">
-            레시피: 선명도 {recipe.sharpen} · 명료도 {recipe.clarity} · 하이라이트 {recipe.highlights} · 쉐도우 {recipe.shadows} · 비네팅 {recipe.vignette} · 그레인 {(() => { const g = recipeGrain(recipe, params.iso); return `${g.amount}/${g.size}${recipe.grain === "acros-iso" ? ` (ISO ${params.iso ?? "미기록→200"})` : ""}`; })()} · CCE {LEVEL_LABEL[recipe.cce]} · FX블루 {LEVEL_LABEL[recipe.fxb]} · HDF {recipe.hdf ? "ON" : "OFF"}
+            필름 프리셋(스튜디오에서 슬라이더로 적용, 이 화면은 LUT·ISP 만): 대비 {preset.contrast} · 하이라이트 {preset.highlights} · 쉐도우 {preset.shadows} · 명료도 {preset.clarity} · 그레인 {preset.grainAmount}/{preset.grainSize} · CCE {LEVEL_LABEL[preset.colorChrome]} · D레인지 DR{preset.dRange}
           </p>
         ) : null}
         <label className="flex flex-col gap-1 text-sm">외부 Look LUT

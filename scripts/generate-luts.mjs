@@ -1,22 +1,20 @@
-// FSE-v2 3D LUT 생성기 — docs/COLOR_SCIENCE.md §5~§7.
+// FSE-v2 3D LUT 생성기 — docs/COLOR_SCIENCE.md §FSE-v2 LUT Kernel. 색 전용 커널(scripts/fse2-kernel.mjs)만 굽는다(톤은 공통 T_ref).
 // 사용: node scripts/generate-luts.mjs [--check]
-// 엔진 로직은 src/lib/color/fse/*.mjs 에서 import 한다(복제 금지). 출력에 타임스탬프·무작위값 없음.
+// 색 파라미터 SSOT = scripts/fse2-kernel.mjs SIMS2, 메타데이터(id·brand·ko·en·mono·순서) = src/lib/color/fse/film-params.mjs. 출력에 타임스탬프·무작위값 없음.
 
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { LUT_SIZE, REF_TONE, SHAPER_C, SHAPER_XMAX } from "../src/lib/color/fse/constants.mjs";
-import { renderPoint, shaperDec, srgbDec, tone, toneCoeffs } from "../src/lib/color/fse/engine.mjs";
 import { FILM_SIMS } from "../src/lib/color/fse/film-params.mjs";
+import { renderPoint2, shaperDec, SIMS2 } from "./fse2-kernel.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(ROOT, "public", "luts");
 const CHECK = process.argv.includes("--check");
 const N = LUT_SIZE;
 
-/** @param {number[]} v */
-const luma709 = (v) => 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
 /** @param {string | Uint8Array} buf */
 const sha256 = (buf) => createHash("sha256").update(buf).digest("hex");
 
@@ -26,7 +24,7 @@ function fail(msg) {
   process.exit(1);
 }
 
-// ---- 2. 생성 전 검증 ----
+// ---- 2. 생성 전 검증 (FSE-v2: 필름 메타데이터 ↔ SIMS2 색 파라미터 1:1) ----
 function validate() {
   /** @type {string[]} */
   const errors = [];
@@ -40,51 +38,36 @@ function validate() {
     if (ids.has(p.id)) errors.push(`id 중복: ${p.id}`);
     ids.add(p.id);
   }
+  const keys = Object.keys(SIMS2);
+  if (keys.length !== 32) errors.push(`SIMS2 키 ${keys.length}개 (기대 32)`);
+  for (const k of keys) if (!ids.has(k)) errors.push(`SIMS2 키 ${k} 가 film-params 에 없음`);
   for (const P of FILM_SIMS) {
-    const k = toneCoeffs(P.tone);
-    if (!(k.b > 0)) errors.push(`${P.id}: b = ${k.b} ≤ 0`);
-    if (!(k.c > 0)) errors.push(`${P.id}: c = ${k.c} ≤ 0`);
-    if (!(k.d <= 1)) errors.push(`${P.id}: d = ${k.d} > 1`);
-    let prev = -Infinity;
-    for (let i = 0; i <= 4000; i++) {
-      const t = tone((k.hdrMax * i) / 4000, k);
-      if (t < prev) {
-        errors.push(`${P.id}: tone 단조 위반 (i=${i})`);
-        break;
-      }
-      prev = t;
-    }
-    if (P.mono) {
-      const m = P.mixer ?? [];
+    const S = SIMS2[P.id];
+    if (!S) { errors.push(`${P.id}: SIMS2 항목 없음`); continue; }
+    if (S.mono !== P.mono) errors.push(`${P.id}: mono 불일치 (film-params ${P.mono}, SIMS2 ${S.mono})`);
+    if (S.mono) {
+      const m = S.mixer ?? [];
       if (m.length !== 3 || m.some((v) => !(v >= 0))) errors.push(`${P.id}: mixer 원소가 3개가 아니거나 음수`);
       const s = m.reduce((acc, v) => acc + v, 0);
       if (Math.abs(s - 1) > 1e-9) errors.push(`${P.id}: mixer 합 = ${s} (기대 1 ± 1e-9)`);
     } else {
-      const hue = P.hue ?? [];
-      if (hue.length !== 8) errors.push(`${P.id}: hue 길이 ${hue.length} (기대 8)`);
-      hue.forEach((row, i) => {
-        if (row.length !== 3 || row.some((v) => !Number.isFinite(v))) errors.push(`${P.id}: hue[${i}] 형식 오류`);
+      S.dye.forEach((row, i) => {
+        const s = row[0] + row[1] + row[2];
+        if (Math.abs(s - 1) > 1e-9) errors.push(`${P.id}: dye[${i}] 행 합 = ${s} (기대 1)`);
       });
-    }
-    let prevY = -Infinity;
-    for (let i = 0; i <= 1023; i++) {
-      const x = shaperDec(i / 1023);
-      const v = renderPoint([x, x, x], P, k);
-      const Y = luma709(v.map(srgbDec));
-      if (Y < prevY - 1e-6) {
-        errors.push(`${P.id}: 중성축 단조 위반 (i=${i}, ${prevY} → ${Y})`);
-        break;
-      }
-      prevY = Y;
+      if (S.hue.length !== 8) errors.push(`${P.id}: hue 길이 ${S.hue.length} (기대 8)`);
+      S.hue.forEach((row, i) => {
+        if (row.length !== 4 || row.some((v) => !Number.isFinite(v))) errors.push(`${P.id}: hue[${i}] 형식 오류`);
+      });
     }
   }
   if (errors.length > 0) fail("\n  " + errors.join("\n  "));
 }
 
 // ---- 3~4. 생성 ----
-/** @param {import("../src/lib/color/fse/engine.mjs").FilmSim} P */
+/** @param {{ id: string, en: string }} P */
 function buildLut(P) {
-  const k = toneCoeffs(P.tone);
+  const S = SIMS2[P.id];
   const grid = new Float64Array(N);
   for (let i = 0; i < N; i++) grid[i] = shaperDec(i / (N - 1));
   const data = new Float64Array(N * N * N * 3);
@@ -92,7 +75,7 @@ function buildLut(P) {
   for (let bi = 0; bi < N; bi++) {
     for (let gi = 0; gi < N; gi++) {
       for (let ri = 0; ri < N; ri++) {
-        const v = renderPoint([grid[ri], grid[gi], grid[bi]], P, k);
+        const v = renderPoint2([grid[ri], grid[gi], grid[bi]], S);
         for (let c = 0; c < 3; c++) {
           const x = v[c];
           if (!Number.isFinite(x) || x < 0 || x > 1) fail(`${P.id}: (${ri},${gi},${bi}) 출력 ${x} 이 [0,1] 밖이거나 유한하지 않음`);
@@ -124,7 +107,7 @@ function buildLut(P) {
     if (v < min) min = v;
     if (v > max) max = v;
   }
-  return { cube, bin, k, min, max, grey: renderPoint([0.18, 0.18, 0.18], P, k)[0] };
+  return { cube, bin, min, max, grey: renderPoint2([0.18, 0.18, 0.18], S)[0] };
 }
 
 validate();
@@ -148,9 +131,9 @@ FILM_SIMS.forEach((P, order) => {
     bin: `/luts/bin/${P.id}.bin`,
     sha256Cube: sha256(r.cube),
     sha256Bin: sha256(r.bin),
-    shaderHints: P.shaderHints,
+    engine: "FSE-v2",
   });
-  summary.push({ id: P.id, b: r.k.b.toFixed(6), c: r.k.c.toFixed(6), grey018: r.grey.toFixed(4), min: r.min.toFixed(6), max: r.max.toFixed(6) });
+  summary.push({ id: P.id, grey018: r.grey.toFixed(4), min: r.min.toFixed(6), max: r.max.toFixed(6) });
 });
 const manifest = {
   schema: "fse-lut-manifest/1",

@@ -1,6 +1,7 @@
 // Step 4 §6 편집 상태 모델 — SLIDERS 상수 하나가 UI·검증·레시피의 SSOT 다.
 import { CURVE_PRESETS, LINEAR_CURVE, curveOn, type CurvePoint, type CurvePreset, type CurveState } from "../render/curve";
-import { recipeFor, recipeGrain, RECIPES } from "../render/recipes";
+import { FILM_PRESETS, NEUTRAL_PRESET, PRESET_KEYS, type CurvePresetId, type FilmPreset } from "../render/film-presets";
+import type { DRange } from "../render/isp";
 
 export type CurveChoice = CurvePreset | "custom";
 export interface EditCurve { preset: CurveChoice; points: CurvePoint[]; zones: [number, number, number, number, number] }
@@ -63,6 +64,8 @@ export interface EditState {
   sharpness: number; clarity: number; dehaze: number;
   hdf: boolean; hdfStrength: number; grainAmount: number; grainSize: number; vignette: number;
   curve: EditCurve;
+  /** FSE-v2 D레인지 (DR100 / DR200 / DR400) */
+  dRange: DRange;
 }
 
 export const LINEAR_POINTS: ReadonlyArray<CurvePoint> = CURVE_PRESETS.linear;
@@ -75,21 +78,9 @@ export function defaultCurve(): EditCurve {
 const PARAM_KEYS: ReadonlyArray<ParamKey> = SLIDERS.filter((x) => !x.key.startsWith("zone")).map((x) => x.key as ParamKey);
 
 export function initialEditState(): EditState {
-  const st = { simId: null, hdf: false, curve: defaultCurve() } as unknown as EditState;
+  const st = { simId: null, hdf: false, curve: defaultCurve(), dRange: 100 } as unknown as EditState;
   for (const k of PARAM_KEYS) (st as unknown as Record<string, number>)[k] = SLIDER_BY_KEY[k].def;
   return st;
-}
-
-/** 데모 사진 전용 시작 상태 (필름 소개용) */
-export const DEMO_SIM_ID = "fuji-classic-chrome";
-
-/**
- * 새 미디어를 열 때의 편집 상태. 사용자 파일(사진·RAW·동영상)은 이전 미디어의 필름·슬라이더·HDF·톤 커브를 하나도 이어받지 않고
- * 완전한 초기 상태(필름 없음, 필름 강도 100%, 모든 보정 0, HDF 끔, 톤 커브 linear)에서 시작한다. 데모만 소개용 필름 + HDF 로 시작한다.
- */
-export function mediaOpenState(demo: boolean): EditState {
-  const st = initialEditState();
-  return demo ? { ...st, simId: DEMO_SIM_ID, hdf: true } : st;
 }
 
 /** 값 정규화: 숫자가 아니거나 NaN 이면 기본값, 그 외 clamp(min,max) → step 반올림 → step 소수 자릿수로 toFixed */
@@ -103,55 +94,92 @@ export function normalizeValue(key: SliderKey, v: unknown): number {
   return Object.is(out, -0) ? 0 : out;
 }
 
-// ── 필름 연동 (§6-3) ──────────────────────────────────────────────────────
-export type SimDefaults = Partial<Pick<EditState, "sharpness" | "clarity" | "highlights" | "shadows" | "vignette" | "grainAmount" | "grainSize" | "cce" | "ccb" | "hdf">>;
+// ── 필름 프리셋 (FSE-v2 §6) ───────────────────────────────────────────────
+export type PresetKey = (typeof PRESET_KEYS)[number];
+export type PresetStateKey = "lightBalance" | "exposure" | "brightness" | "contrast" | "highlights" | "shadows" | "whites" | "blacks"
+  | "temp" | "tint" | "saturation" | "vibrance" | "cce" | "ccb" | "clarity" | "sharpness" | "dehaze" | "grainAmount" | "grainSize" | "vignette"
+  | "curve" | "hdf" | "hdfStrength" | "dRange";
+
+/** §6-2 키 대응: 프리셋 키 → EditState 키 (표에 없는 키는 같은 이름) */
+const STATE_KEY: Readonly<Partial<Record<PresetKey, PresetStateKey>>> = {
+  temperature: "temp", colorChrome: "cce", colorChromeBlue: "ccb", sharpen: "sharpness", hdfEnabled: "hdf", toneCurve: "curve",
+};
+export function stateKeyOf(k: PresetKey): PresetStateKey {
+  return STATE_KEY[k] ?? (k as PresetStateKey);
+}
+
+/** 프리셋 커브 id → Step 3 CURVE_PRESETS 키 (medium = 약한 대비 S-커브, strong = 강한 대비, softHighlight = 소프트 하이라이트) */
+export const CURVE_ID: Readonly<Record<Exclude<CurvePresetId, "custom">, CurvePreset>> = {
+  linear: "linear", medium: "weak-contrast", strong: "strong-contrast", matte: "matte", softHighlight: "soft-highlight",
+};
+
+export type PresetState = Pick<EditState, PresetStateKey>;
+
+/** 프리셋 → EditState 값 (커브: custom 이면 points 그대로, 아니면 Step 3 PRESETS[preset], zones 그대로) */
+export function presetToState(p: FilmPreset): PresetState {
+  const tc = p.toneCurve;
+  const src: ReadonlyArray<CurvePoint> = tc.preset === "custom" ? (tc.points ?? LINEAR_POINTS) : CURVE_PRESETS[CURVE_ID[tc.preset]];
+  const points = clonePoints(src);
+  const out = {} as Record<PresetStateKey, unknown>;
+  for (const k of PRESET_KEYS) out[stateKeyOf(k)] = p[k];
+  out.curve = { preset: presetOfPoints(points), points, zones: [...tc.zones] as EditCurve["zones"] } satisfies EditCurve;
+  return out as PresetState;
+}
+
+/** 필름 id 의 프리셋 (null = 필름 없음 → NEUTRAL_PRESET) */
+export function presetOf(simId: string | null): FilmPreset {
+  if (simId === null) return NEUTRAL_PRESET;
+  const p = FILM_PRESETS[simId];
+  if (!p) throw new Error(`필름 프리셋이 없는 시뮬레이션입니다: ${simId} — src/lib/render/film-presets.ts 표에 추가하세요.`);
+  return p;
+}
 
 /**
- * Step 3 마스터 레시피 표(recipes.ts)의 값이 0/false 가 아닌 항목이 연동 키다. FSE-v2 에서는 표가 전부 중립이라 항상 {} 이다
- * (필름 선택이 슬라이더를 건드리지 않음 — LUT 위 이중 적용 금지).
- * 대응: sharpen→sharpness, grain.amount→grainAmount, grain.size→grainSize, fxb→ccb, 그 밖의 키는 같은 이름.
+ * §6-3 필름 선택: PRESET_KEYS 의 모든 값을 FILM_PRESETS[id](null 이면 NEUTRAL_PRESET)로 통째로 교체한다.
+ * 이전 필름의 값은 남지 않는다. filmStrength, monoHue, monoAmount(와 입력 색공간)는 바꾸지 않는다.
  */
-export function simDefaults(simId: string | null, iso: number | null = null): SimDefaults {
-  if (simId === null || !(simId in RECIPES)) return {};
-  const rc = recipeFor(simId);
-  const g = recipeGrain(rc, iso);
-  const out: SimDefaults = {};
-  if (rc.sharpen !== 0) out.sharpness = rc.sharpen;
-  if (rc.clarity !== 0) out.clarity = rc.clarity;
-  if (rc.highlights !== 0) out.highlights = rc.highlights;
-  if (rc.shadows !== 0) out.shadows = rc.shadows;
-  if (rc.vignette !== 0) out.vignette = rc.vignette;
-  if (g.amount !== 0) out.grainAmount = g.amount;
-  if (g.size !== 0) out.grainSize = g.size;
-  if (rc.cce !== 0) out.cce = rc.cce;
-  if (rc.fxb !== 0) out.ccb = rc.fxb;
-  if (rc.hdf) out.hdf = true;
-  return out;
+export function selectFilm(state: EditState, id: string | null): EditState {
+  return { ...state, ...presetToState(presetOf(id)), simId: id };
 }
 
-/** 더블탭 기본값: 연동값이 있으면 그 값, 없으면 §6-2 표의 기본값 */
-export function defaultFor(key: SliderKey, simId: string | null, iso: number | null = null): number {
-  if (!key.startsWith("zone")) {
-    const d = simDefaults(simId, iso) as Record<string, unknown>;
-    const v = d[key];
-    if (typeof v === "number") return v;
-  }
-  return SLIDER_BY_KEY[key].def;
+/** §6-3 새 파일·데모를 열 때: 필름 없음 + NEUTRAL_PRESET, 필름 강도 100, 흑백 조색 0 (입력 색공간 Auto 는 히스토리 스냅샷이 담당) */
+export function resetForNewMedia(): EditState {
+  return { ...selectFilm(initialEditState(), null), filmStrength: 100, monoHue: 0, monoAmount: 0 };
 }
 
-/** 필름 선택: prev 연동 키 ∪ next 연동 키를 next 연동값 또는 §6-2 기본값으로 덮어쓰고, 나머지(필름 강도 포함)는 그대로 둔다 */
-export function selectSim(state: EditState, next: string | null, iso: number | null = null): EditState {
-  const prev = simDefaults(state.simId, iso) as Record<string, unknown>;
-  const nd = simDefaults(next, iso) as Record<string, unknown>;
-  const out: EditState = { ...state, curve: state.curve };
-  const o = out as unknown as Record<string, unknown>;
-  for (const key of new Set([...Object.keys(prev), ...Object.keys(nd)])) {
-    if (key in nd) o[key] = nd[key];
-    else o[key] = key === "hdf" ? false : SLIDER_BY_KEY[key as SliderKey].def;
-  }
-  out.simId = next;
-  return out;
+/** 데모 사진 전용 시작 필름 (필름 소개용) */
+export const DEMO_SIM_ID = "fuji-classic-chrome";
+
+/** 새 미디어를 열 때의 편집 상태: resetForNewMedia(), 데모는 이어서 selectFilm('fuji-classic-chrome') 만 */
+export function mediaOpenState(demo: boolean): EditState {
+  const st = resetForNewMedia();
+  return demo ? selectFilm(st, DEMO_SIM_ID) : st;
 }
+
+/** 프리셋이 정하는 슬라이더 키 (필름 강도·흑백 조색은 프리셋 밖) */
+const PRESET_SLIDER: ReadonlySet<SliderKey> = new Set<SliderKey>([
+  "lightBalance", "exposure", "brightness", "contrast", "highlights", "shadows", "whites", "blacks", "temp", "tint", "saturation", "vibrance",
+  "cce", "ccb", "clarity", "sharpness", "dehaze", "grainAmount", "grainSize", "vignette", "hdfStrength", "zone0", "zone1", "zone2", "zone3", "zone4",
+]);
+
+/** 더블탭 기본값: defaultFor(key) = (simId ? FILM_PRESETS[simId] : NEUTRAL_PRESET)[key], 프리셋 밖 키는 §6-2 표 기본값 */
+export function defaultFor(key: SliderKey, simId: string | null): number {
+  if (!PRESET_SLIDER.has(key)) return SLIDER_BY_KEY[key].def;
+  const ps = presetToState(presetOf(simId));
+  if (key.startsWith("zone")) return ps.curve.zones[Number(key.slice(4))]!;
+  return (ps as unknown as Record<string, number>)[key]!;
+}
+
+/** §6-4 트랙 눈금: simId ≠ null 이고 프리셋 값이 NEUTRAL_PRESET 과 다르면 그 값, 아니면 null */
+export function presetTick(key: SliderKey, simId: string | null): number | null {
+  if (simId === null) return null;
+  const v = defaultFor(key, simId);
+  return v !== defaultFor(key, null) ? v : null;
+}
+
+export const D_RANGES: ReadonlyArray<DRange> = [100, 200, 400];
+/** D레인지 정규화: 100/200/400 이 아니면 100 */
+export const normalizeDRange = (v: unknown): DRange => (v === 200 || v === 400 ? v : 100);
 
 // ── 값 읽기/쓰기 ──────────────────────────────────────────────────────────
 export function getValue(st: EditState, key: SliderKey): number {
@@ -208,17 +236,18 @@ export { curveOn, LINEAR_CURVE };
 
 // ── 필름 조회 (F) ─────────────────────────────────────────────────────────
 export interface SimInfo { id: string; ko: string; en?: string; brand: "fujifilm" | "ricoh"; mono: boolean }
-/** simRecipe(simId): Step 3 마스터 레시피 + manifest 의 mono 여부. 필름 없음은 mono=false */
-export function simRecipe(simId: string | null, sims: ReadonlyArray<SimInfo>): { recipe: ReturnType<typeof recipeFor>; mono: boolean; ko: string } {
+/** simRecipe(simId): manifest 의 brand·mono·한글명. 필름 없음은 brand null, mono=false */
+export function simRecipe(simId: string | null, sims: ReadonlyArray<SimInfo>): { brand: SimInfo["brand"] | null; mono: boolean; ko: string } {
   const info = simId === null ? null : (sims.find((x) => x.id === simId) ?? null);
-  return { recipe: recipeFor(simId ?? "none"), mono: info?.mono ?? false, ko: info?.ko ?? "필름 없음" };
+  return { brand: info?.brand ?? null, mono: info?.mono ?? false, ko: info?.ko ?? "필름 없음" };
 }
 
 // ── reducer ───────────────────────────────────────────────────────────────
 export type EditAction =
   | { type: "set"; key: SliderKey; value: number }
-  | { type: "reset"; key: SliderKey; iso: number | null }
-  | { type: "selectSim"; simId: string | null; iso: number | null }
+  | { type: "reset"; key: SliderKey }
+  | { type: "selectFilm"; simId: string | null }
+  | { type: "setDRange"; value: DRange }
   | { type: "toggleHdf" }
   | { type: "setHdf"; value: boolean }
   | { type: "curve"; curve: EditCurve }
@@ -230,8 +259,9 @@ export type EditAction =
 export function editReducer(st: EditState, a: EditAction): EditState {
   switch (a.type) {
     case "set": return setValue(st, a.key, a.value);
-    case "reset": return setValue(st, a.key, defaultFor(a.key, st.simId, a.iso));
-    case "selectSim": return selectSim(st, a.simId, a.iso);
+    case "reset": return setValue(st, a.key, defaultFor(a.key, st.simId));
+    case "selectFilm": return selectFilm(st, a.simId);
+    case "setDRange": return { ...st, dRange: normalizeDRange(a.value) };
     case "toggleHdf": return { ...st, hdf: !st.hdf };
     case "setHdf": return { ...st, hdf: a.value };
     case "curve": return { ...st, curve: a.curve };
