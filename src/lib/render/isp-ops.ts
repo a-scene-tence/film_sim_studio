@@ -10,11 +10,11 @@ const sq = (x: number) => x * x;
 const lumaPos = (x: ArrayLike<number>) => LUMA[0] * Math.max(x[0]!, 0) + LUMA[1] * Math.max(x[1]!, 0) + LUMA[2] * Math.max(x[2]!, 0);
 const scale3 = (x: ArrayLike<number>, k: number): Vec3 => [x[0]! * k, x[1]! * k, x[2]! * k];
 
-/** 5-1 S0 롤오프 (상한 uRollW = 2.04·2^drStops) */
+/** 5-1 S0 롤오프 (상한 uRollW = 2.04·2^drStops). tanh 인자는 GLSL 과 같게 15 로 묶는다(고휘도 GPU NaN 가드, float32 에서 결과 동일) */
 export function rolloffW(x: ArrayLike<number>, rollW: number): Vec3 {
   const Y = lumaPos(x);
   if (Y <= 1) return [x[0]!, x[1]!, x[2]!];
-  const Yp = 1 + (rollW - 1) * Math.tanh((Y - 1) / (rollW - 1));
+  const Yp = 1 + (rollW - 1) * Math.tanh(Math.min((Y - 1) / (rollW - 1), 15));
   return scale3(x, Yp / Y);
 }
 

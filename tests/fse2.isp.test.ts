@@ -212,3 +212,18 @@ describe("gamutMap tanh 오버플로 가드 (GPU NaN → 회색 점 방지)", ()
     expect(Math.fround(Math.tanh(15))).toBe(1);
   });
 });
+
+describe("rolloffY tanh 오버플로 가드 (5-7-7, 사용자 확정)", () => {
+  it("fs_normalize: tanh(min((Y - 1.0) / (uRollW - 1.0), 15.0))", () => {
+    expect(FS_NORMALIZE_GLSL).toContain("tanh(min((Y - 1.0) / (uRollW - 1.0), 15.0))");
+  });
+  it("CPU 미러: 고휘도에서 유한하고 상한 uRollW 이하, 가드 전과 1e-11 이내 (float32 정밀도보다 훨씬 작음)", () => {
+    for (const W of [2.04, 4.08, 8.16]) for (const Y of [50, 1e3, 1e6, 1e30]) {
+      const y = rolloffW(g(Y), W)[0];
+      expect(Number.isFinite(y)).toBe(true);
+      expect(y).toBeLessThanOrEqual(W);
+      near(y, 1 + (W - 1) * Math.tanh((Y - 1) / (W - 1)), 1e-11);
+    }
+    near(rolloffW(g(3), 2.04)[0], 1 + 1.04 * Math.tanh(2 / 1.04), 1e-15);
+  });
+});
