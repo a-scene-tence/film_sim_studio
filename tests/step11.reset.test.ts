@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { historyReducer, historyTimeline, initialHistory, type HistoryState } from "../src/lib/studio/history";
 import {
-  editReducer, initialEditState, isEditDefault, isTabDefault, RESET_ALL_LABEL, resetTab, TAB_RESET_LABEL, type EditState, type SliderKey, type TabId,
+  editReducer, initialEditState, isEditDefault, isTabDefault, resetTab, TAB_RESET_LABEL, type EditState, type SliderKey, type TabId,
 } from "../src/lib/studio/state";
 
 /** 모든 탭의 값을 기본에서 벗어나게 만든 상태 */
@@ -99,6 +99,8 @@ describe("탭별 초기화", () => {
   });
 });
 
+const dirtyHistory = (h: HistoryState): HistoryState => ({ ...h, present: { ...h.present, edit: dirty() } });
+
 describe("전체 초기화", () => {
   it("필름·모든 탭·커브·HDF·그레인을 초기 상태로 되돌린다", () => {
     const n = editReducer(dirty(), { type: "resetAll" });
@@ -106,17 +108,19 @@ describe("전체 초기화", () => {
     expect(isEditDefault(n)).toBe(true);
     expect(isEditDefault(dirty())).toBe(false);
   });
-  it("'전체 초기화' 1단계로 기록 → 되돌리기로 복구, 다시 실행 가능. 입력 색공간 선택은 유지", () => {
-    let h: HistoryState = initialHistory({ edit: dirty(), choice: "slog3" });
-    const before = h.present.edit;
-    h = historyReducer(h, { type: "do", label: RESET_ALL_LABEL, action: { type: "resetAll" } });
-    expect(historyTimeline(h).at(-1)!.label).toBe("전체 초기화");
+  it("clearAll: 값은 기본으로, undo/redo 스택은 모두 비움. 입력 색공간 선택은 유지", () => {
+    let h: HistoryState = initialHistory({ edit: initialEditState(), choice: "slog3" });
+    h = historyReducer(h, { type: "do", action: { type: "set", key: "exposure", value: 1 } });
+    h = historyReducer(h, { type: "do", action: { type: "set", key: "contrast", value: 20 } });
+    h = historyReducer(h, { type: "undo" });
+    expect(h.past.length).toBe(1);
+    expect(h.future.length).toBe(1);
+    h = historyReducer(dirtyHistory(h), { type: "clearAll" });
     expect(h.present.edit).toEqual(initialEditState());
     expect(h.present.choice).toBe("slog3");
-    h = historyReducer(h, { type: "undo" });
-    expect(h.present.edit).toEqual(before);
-    h = historyReducer(h, { type: "redo" });
-    expect(h.present.edit).toEqual(initialEditState());
+    expect(h.past).toEqual([]);
+    expect(h.future).toEqual([]);
+    expect(historyTimeline(h).map((e) => e.label)).toEqual(["초기 상태"]);
   });
 });
 
@@ -125,11 +129,11 @@ describe("Studio / Header / 탭 UI 연결", () => {
   it("Studio: 탭 초기화·전체 초기화를 히스토리 라벨과 함께 dispatch", () => {
     const src = read("../src/components/studio/Studio.tsx");
     expect(src).toContain('action: { type: "resetTab", tab }');
-    expect(src).toContain('action: { type: "resetAll" }');
+    expect(src).toContain('histDispatch({ type: "clearAll" })');
     expect(src).toContain("TAB_RESET_LABEL[tab]");
     expect(src).toContain("RESET_ALL_LABEL");
     expect(src).toContain("<TabResetBar");
-    expect(src).toContain("resetAllEnabled={!isEditDefault(state)}");
+    expect(src).toContain("hist.past.length > 0 || hist.future.length > 0");
   });
   it("Header: 전체 초기화 버튼, 기본 상태에서는 비활성", () => {
     const src = read("../src/components/studio/Header.tsx");
