@@ -15,20 +15,28 @@ export function hueGradient(): string {
   return `linear-gradient(90deg, ${stops.join(", ")})`;
 }
 
-export interface ColorTabProps { onAuto(): void; picking: boolean; onTogglePick(): void }
+export interface ColorTabProps { onAutoWb(): void; onAutoChroma(): void; picking: boolean; onTogglePick(): void }
 
-export function ColorTab({ onAuto, picking, onTogglePick }: ColorTabProps) {
+export function ColorTab({ onAutoWb, onAutoChroma, picking, onTogglePick }: ColorTabProps) {
   const { mono, asset, renderer } = useStudio();
   const ready = !!asset && !!renderer;
   const grad = useMemo(() => hueGradient(), []);
   return (
     <div className="flex flex-col">
-      <button
-        type="button" disabled={!ready} onClick={onAuto}
-        className="mb-1 h-11 w-full rounded-[10px] border border-[var(--accent)] text-[14px] font-semibold text-[var(--accent)] disabled:opacity-40"
-      >
-        컬러 자동 보정
-      </button>
+      <div className="mb-1 grid grid-cols-2 gap-1">
+        <button
+          type="button" disabled={!ready} onClick={onAutoWb}
+          className="min-h-11 rounded-[10px] border border-[var(--accent)] px-1 text-[13px] font-semibold leading-tight text-[var(--accent)] disabled:opacity-40"
+        >
+          자동 화이트밸런스
+        </button>
+        <button
+          type="button" disabled={!ready} onClick={onAutoChroma}
+          className="min-h-11 rounded-[10px] border border-[var(--accent)] px-1 text-[13px] font-semibold leading-tight text-[var(--accent)] disabled:opacity-40"
+        >
+          자동 채도·생동감
+        </button>
+      </div>
       <button
         type="button" disabled={!ready} onClick={onTogglePick} aria-pressed={picking}
         className="mb-1 h-11 w-full rounded-[10px] border text-[14px] disabled:opacity-40"

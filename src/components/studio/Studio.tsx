@@ -9,11 +9,11 @@ import { RenderError } from "@/lib/render/gl";
 import { OUTPUT_SPACE_KEY, parseOutputSpace, type OutputSpace } from "@/lib/render/output-space";
 import { isoFromSummary } from "@/lib/render/params";
 import { filmBadgeLabel } from "@/lib/export/frame";
-import { computeAutoLight } from "@/lib/studio/auto-light";
+import { AUTO_LIGHT_LABEL, computeAutoLightMode, type AutoLightMode } from "@/lib/studio/auto-light";
 import { autoProfile, badgeText, type InputChoice } from "@/lib/studio/input-profile";
-import { initialEditState, mediaOpenState, type EditAction, type SimInfo, type TabId } from "@/lib/studio/state";
+import { editReducer, initialEditState, mediaOpenState, type EditAction, type SimInfo, type TabId } from "@/lib/studio/state";
 import { AboutSheet } from "./AboutSheet";
-import { computeAutoColor, solveEyedropperOutput } from "@/lib/studio/color-auto";
+import { computeAutoChroma, computeAutoWb, solveEyedropperOutput } from "@/lib/studio/color-auto";
 import { HistoryTimelineSheet } from "./HistoryTimelineSheet";
 import { historyReducer, historyTimeline, initialHistory, redoLabel, undoLabel } from "@/lib/studio/history";
 import { startThumbnails } from "@/lib/studio/thumbs";
@@ -271,30 +271,47 @@ export default function Studio() {
   }, [choice, asset, renderer, applyProfile]);
 
   // ── 자동 보정 ────────────────────────────────────────────────────────────
-  const runAuto = useCallback(() => {
+  const runAuto = useCallback((mode: AutoLightMode) => {
     if (!renderer || !asset) return;
     try {
-      const r = computeAutoLight(renderer.readAnalysisLuma());
-      dispatch({ type: "patch", values: { exposure: r.exposure, contrast: r.contrast, highlights: r.highlights, shadows: r.shadows, whites: r.whites, blacks: r.blacks, brightness: 0, lightBalance: 0 } });
-      toast("자동 보정 적용", { duration: 5000, actions: [{ label: "되돌리기", onClick: () => histDispatch({ type: "undo" }) }] });
+      const r = computeAutoLightMode(renderer.readAnalysisLuma(), mode);
+      const values = { exposure: r.exposure, contrast: r.contrast, highlights: r.highlights, shadows: r.shadows, whites: r.whites, blacks: r.blacks, brightness: r.brightness, lightBalance: r.lightBalance };
+      const label = AUTO_LIGHT_LABEL[mode];
+      // D레인지까지 정하는 모드는 한 단계로 묶기 위해 상태 통째로 교체한다
+      const action: EditAction = r.dRange === null
+        ? { type: "patch", values }
+        : { type: "replace", state: { ...editReducer(state, { type: "patch", values }), dRange: r.dRange } };
+      histDispatch({ type: "do", label, action });
+      toast(`${label} 적용`, { duration: 5000, actions: [{ label: "되돌리기", onClick: () => histDispatch({ type: "undo" }) }] });
     } catch (e) {
       toast(e instanceof Error ? e.message : String(e));
     }
-  }, [renderer, asset, dispatch, toast]);
+  }, [renderer, asset, state, toast]);
 
-  // ── 컬러 자동 보정 / WB 스포이트 ────────────────────────────────────────
+  // ── 컬러 자동 보정(WB / 채도·생동감 분리) · WB 스포이트 ───────────────────
   const [aboutOpen, setAboutOpen] = useState(false);
-  const runAutoColor = useCallback(() => {
+  const runAutoWb = useCallback(() => {
     if (!renderer || !asset) return;
     try {
-      const r = computeAutoColor(renderer.readAnalysisRgb(256));
+      const r = computeAutoWb(renderer.readAnalysisRgb(256));
       if (!r) { toast("분석할 수 있는 픽셀이 부족합니다. 순백·순흑이 대부분이라 자동 보정을 건너뜁니다."); return; }
-      histDispatch({ type: "do", label: "컬러 자동 보정", action: { type: "patch", values: { temp: r.temp, tint: r.tint, vibrance: r.vibrance, saturation: r.saturation } } });
-      toast("컬러 자동 보정 적용", { duration: 5000, actions: [{ label: "되돌리기", onClick: () => histDispatch({ type: "undo" }) }] });
+      histDispatch({ type: "do", label: "자동 화이트밸런스", action: { type: "patch", values: { temp: r.temp, tint: r.tint } } });
+      toast("자동 화이트밸런스 적용", { duration: 5000, actions: [{ label: "되돌리기", onClick: () => histDispatch({ type: "undo" }) }] });
     } catch (e) {
       toast(e instanceof Error ? e.message : String(e));
     }
   }, [renderer, asset, toast]);
+  const runAutoChroma = useCallback(() => {
+    if (!renderer || !asset) return;
+    try {
+      const r = computeAutoChroma(renderer.readAnalysisRgb(256), state.temp, state.tint);
+      if (!r) { toast("분석할 수 있는 픽셀이 부족합니다. 순백·순흑이 대부분이라 자동 보정을 건너뜁니다."); return; }
+      histDispatch({ type: "do", label: "자동 채도·생동감", action: { type: "patch", values: { vibrance: r.vibrance, saturation: r.saturation } } });
+      toast("자동 채도·생동감 적용", { duration: 5000, actions: [{ label: "되돌리기", onClick: () => histDispatch({ type: "undo" }) }] });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e));
+    }
+  }, [renderer, asset, state.temp, state.tint, toast]);
   const onPick = useCallback((u: number, v: number) => {
     if (!renderer || !asset) return;
     try {
@@ -408,7 +425,7 @@ export default function Studio() {
             <div className="studio-panel overflow-y-auto bg-[var(--panel)] px-4 py-2" style={{ touchAction: "pan-y" }}>
               {tab === "film" ? <FilmTab /> : null}
               {tab === "light" ? <LightTab onAuto={runAuto} /> : null}
-              {tab === "color" ? <ColorTab onAuto={runAutoColor} picking={picking} onTogglePick={() => setPicking((p) => !p)} /> : null}
+              {tab === "color" ? <ColorTab onAutoWb={runAutoWb} onAutoChroma={runAutoChroma} picking={picking} onTogglePick={() => setPicking((p) => !p)} /> : null}
               {tab === "curve" ? <CurveTab /> : null}
               {tab === "detail" ? <DetailTab /> : null}
             </div>

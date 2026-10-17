@@ -820,7 +820,7 @@ export class FilmRenderer {
         ct: s.uCt, vig: s.uVig, aspect: R.width / R.height, lut, mono: e.mono, ke: s.uKe, kb: s.uKb,
         curve: curveOn(this.params.curve) ? this.curveTable : null,
         sat: s.uSat, vib: s.uVib, filmStrength: s.uFilmStrength, monoTint: s.uMonoTint,
-        isp: (() => { const q = this.ispFor(1); return { drStops: q.uDrStops, sceneRef: q.uSceneRef, hd: q.uIspHd }; })(),
+        isp: (() => { const q = this.ispFor(1); return { drStops: q.uDrStops, sceneRef: q.uSceneRef, hd: q.uIspHd, drY0: q.uDrY0, drS: q.uDrS }; })(),
         grain: s.uGrainAmt > 0 ? { amount: s.uGrainAmt, scale: grainScalePreview(this.outShort(), Math.min(R.width, R.height), e.adjust.grainSize), off: grainOffset(0), coarse: grainCoarse(e.adjust.grainSize) } : null,
       };
       return { ctx, R };

@@ -21,6 +21,8 @@ uniform float uIspPop;       // zone III-IV micro-contrast gain = brand ISP pop 
 uniform float uIspHd;        // highlight density = brand ISP hd x film strength
 uniform float uDrStops;      // 0, 1, 2 (DR100 / DR200 / DR400)
 uniform bool uSceneRef;      // true when the source has highlight headroom (RAW, Log, HLG)
+uniform float uDrY0;         // display-referred DR shoulder knee (scene Y), unused when uDrS = 0
+uniform float uDrS;          // display-referred DR shoulder softness (0 = off)
 const float ISP_YK = 0.328679008;  // scene Y whose T_ref display L = 0.70
 const float ISP_UO = 2.63381793;   // log2(2.04 / ISP_YK)
 out vec4 outColor;
@@ -77,6 +79,13 @@ vec3 filmShoulder(vec3 x) {
   float up = u >= Ui ? ISP_UO : ISP_UO * (1.0 - pow(1.0 - u / Ui, Ui / ISP_UO));
   return x * (ISP_YK * exp2(up) / Y);
 }
+vec3 drShoulder(vec3 x) {
+  if (uDrS <= 0.0) return x;
+  float Y = dot(LUMA, max(x, 0.0));
+  if (Y <= uDrY0) return x;
+  float nd = (Y - uDrY0) / uDrS;
+  return x * ((uDrY0 + uDrS * nd / sqrt(1.0 + nd * nd)) / Y);
+}
 vec3 hdOp(vec3 v) {
   vec3 lab = linToOklab(srgbDec(v));
   if (lab.x <= 0.70) return v;
@@ -118,6 +127,7 @@ void main() {
   if (uVig != 0.0) x *= vignetteF(uvG);
   x = clipNeg(x);
   x = filmShoulder(x);
+  x = drShoulder(x);
   vec3 v = lutStage(x);
   if (uIspHd > 0.0) v = hdOp(v);
   outColor = vec4(v, 1.0);

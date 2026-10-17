@@ -7,7 +7,8 @@ import { encodeLutInput } from "../color/fse/lut-domain.mjs";
 import { tetraSample } from "../color/fse/tetra.mjs";
 import * as T from "../color/source/transfer.mjs";
 import { sampleCurve } from "./curve";
-import { edgeSoftenL, filmShoulder, hdOp, rolloffW, zoneShadowPop } from "./isp-ops";
+import { GRAIN_CELL } from "./grain";
+import { drShoulder, edgeSoftenL, filmShoulder, hdOp, rolloffW, zoneShadowPop } from "./isp-ops";
 import { apply3, type Mat3 } from "./wb";
 
 export type Vec3 = [number, number, number];
@@ -283,42 +284,31 @@ export function sharpenL(L: number, blur: number, Sh: number, es = 0): number {
   return edgeSoftenL(L + (Sh / 100) * 1.2 * Dp, D, es);
 }
 
-// ── S13 그레인 (Ashima/Gustavson webgl-noise, MIT) ─────────────────────────
-const mod289 = (x: number) => x - Math.floor(x * (1 / 289)) * 289;
-const permute = (x: number) => mod289((x * 34 + 10) * x);
-const fract = (x: number) => x - Math.floor(x);
+// ── S13 그레인 (격자 해시 값 노이즈 + quintic 보간, docs/COLOR_SCIENCE.md §16.13) ──
+/** 격자점 해시 → [−1, 1). pcg3d 정수 해시라 GPU(uvec3)와 같은 값 */
+function latticeHash(ix: number, iy: number, seed: number): number {
+  return (pcg3d(ix >>> 0, iy >>> 0, seed)[0] / 4294967296) * 2 - 1;
+}
+const quintic = (t: number) => t * t * t * (t * (t * 6 - 15) + 10);
 
-export function snoise(vx: number, vy: number): number {
-  const C0 = 0.211324865405187, C1 = 0.366025403784439, C2 = -0.577350269189626, C3 = 0.024390243902439;
-  const s = (vx + vy) * C1;
-  let ix = Math.floor(vx + s), iy = Math.floor(vy + s);
-  const t = (ix + iy) * C0;
-  const x0x = vx - ix + t, x0y = vy - iy + t;
-  const i1x = x0x > x0y ? 1 : 0, i1y = x0x > x0y ? 0 : 1;
-  const x12 = [x0x + C0 - i1x, x0y + C0 - i1y, x0x + C2, x0y + C2] as const;
-  ix = mod289(ix); iy = mod289(iy);
-  const p0 = permute(permute(iy) + ix);
-  const p1 = permute(permute(iy + i1y) + ix + i1x);
-  const p2 = permute(permute(iy + 1) + ix + 1);
-  const m = [
-    Math.max(0.5 - (x0x * x0x + x0y * x0y), 0),
-    Math.max(0.5 - (x12[0] * x12[0] + x12[1] * x12[1]), 0),
-    Math.max(0.5 - (x12[2] * x12[2] + x12[3] * x12[3]), 0),
-  ].map((q) => q * q * q * q);
-  const xs = [p0, p1, p2].map((p) => 2 * fract(p * C3) - 1);
-  const hs = xs.map((x) => Math.abs(x) - 0.5);
-  const a0 = xs.map((x) => x - Math.floor(x + 0.5));
-  const mm = m.map((q, i) => q * (1.79284291400159 - 0.85373472095314 * (a0[i]! * a0[i]! + hs[i]! * hs[i]!)));
-  const g0 = a0[0]! * x0x + hs[0]! * x0y;
-  const g1 = a0[1]! * x12[0] + hs[1]! * x12[1];
-  const g2 = a0[2]! * x12[2] + hs[2]! * x12[3];
-  return 130 * (mm[0]! * g0 + mm[1]! * g1 + mm[2]! * g2);
+/** 격자 해시 값 노이즈 (quintic 보간 = C2 연속, 가장자리가 부드러운 입자). 값 범위 [−1, 1] */
+export function valueNoise(qx: number, qy: number, seed: number): number {
+  const fx = Math.floor(qx), fy = Math.floor(qy);
+  const tx = quintic(qx - fx), ty = quintic(qy - fy);
+  const a = latticeHash(fx, fy, seed), b = latticeHash(fx + 1, fy, seed);
+  const c = latticeHash(fx, fy + 1, seed), d = latticeHash(fx + 1, fy + 1, seed);
+  return a + (b - a) * tx + (c - a) * ty + (a - b - c + d) * tx * ty;
 }
 
-/** 섹션 5.15 n — px = 이미지 픽셀 중심 좌표 */
+/**
+ * 섹션 5.15 은염 입자 n — px = 이미지 픽셀 중심 좌표
+ * q = px/(scale·GRAIN_CELL) + off. 세 옥타브 값 노이즈(기본 + 2.03배 미세 + coarse 가중 0.5배 큰 입자)를 합친 뒤,
+ * 저주파 변조로 입자가 군집(clumping)하게 한다. 색 성분 없이 스칼라 하나(루미넌스 농도 변조).
+ */
 export function grainNoise(pxX: number, pxY: number, scale: number, off: [number, number], coarse = 0): number {
-  const qx = pxX / scale + off[0], qy = pxY / scale + off[1];
-  return (0.72 * snoise(qx, qy) + 0.28 * snoise(qx * 2.03 + 17.13, qy * 2.03 + 41.71) + 0.35 * coarse * snoise(qx * 0.5 + 29.3, qy * 0.5 + 5.9)) * (0.65 + 0.35 * snoise(qx * 0.37 + 3.7, qy * 0.37 + 9.1));
+  const qx = pxX / (scale * GRAIN_CELL) + off[0], qy = pxY / (scale * GRAIN_CELL) + off[1];
+  const n = 0.62 * valueNoise(qx, qy, 0) + 0.26 * valueNoise(qx * 2.03 + 17.13, qy * 2.03 + 41.71, 1) + 0.5 * coarse * valueNoise(qx * 0.5 + 29.3, qy * 0.5 + 5.9, 2);
+  return 1.25 * n * (0.65 + 0.35 * valueNoise(qx * 0.37 + 3.7, qy * 0.37 + 9.1, 3));
 }
 
 /** 그레인 최종 강도 계수 (구 0.07 의 약 2.93배) */
@@ -368,7 +358,7 @@ export interface PixelCtx {
   filmStrength?: number;
   monoTint?: [number, number];
   /** FSE-v2 카메라 ISP 픽셀 단계: S6b 필름 숄더(drStops, sceneRef), S7b 하이라이트 밀도(hd). 공간 단계(MH, ZS·팝, ES)는 프로브에서 꺼진다 */
-  isp?: { drStops: number; sceneRef: boolean; hd: number };
+  isp?: { drStops: number; sceneRef: boolean; hd: number; /** 표시 기준 소스의 D레인지 숄더 (생략 = 꺼짐) */ drY0?: number; drS?: number };
 }
 
 /** v = 소스 텍셀, (u, vv) = 전역 uv, (pxX, pxY) = 이미지 픽셀 중심 좌표 */
@@ -382,7 +372,7 @@ export function pixelPipelineFromWs(x0: ArrayLike<number>, u: number, vv: number
   if (c.ct !== 0) x = contrastOp(x, c.ct);
   if (c.vig !== 0) { const f = vignetteF(u, vv, c.aspect, c.vig); x = map3(x, (q) => q * f); }
   x = clipNeg(x);
-  if (c.isp) x = filmShoulder(x, c.isp.drStops, c.isp.sceneRef);
+  if (c.isp) x = drShoulder(filmShoulder(x, c.isp.drStops, c.isp.sceneRef), c.isp.drY0 ?? 0, c.isp.drS ?? 0);
   let o = lutStage(x, c.lut);
   if (c.lut.mode !== 0 && (c.filmStrength ?? 1) < 1) o = filmStrengthMix(originalEnc(x), o, c.filmStrength ?? 1);
   if (c.isp && c.isp.hd > 0) o = hdOp(o, c.isp.hd, gamutMap16);

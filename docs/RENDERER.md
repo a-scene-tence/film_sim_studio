@@ -137,11 +137,10 @@ S14 디더·출력
 - D = L − blur, D' = sign(D)·max(|D|−0.004, 0)
 - L' = L + (Sh/100)·1.2·D', Sh ∈ [0,150]
 ### 5.15 S13 은염 클럼핑 그레인
-- Ashima/Gustavson 2D 심플렉스(webgl-noise MIT, permute 계수 +10.0)
-- n = (0.72·snoise(q) + 0.28·snoise(2.03q + (17.13,41.71)))·(0.65 + 0.35·snoise(0.37q + (3.7,9.1)))
+- 격자 해시(pcg3d) 값 노이즈 + quintic 보간, n 정의는 COLOR_SCIENCE §16.13 (구 심플렉스 snoise 폐기)
 - 루미넌스 마스크 b(vl) = 0.4 + 0.6·sqrt(4·vl·(1−vl)), vl = luma709(v) (바닥값 0.4)
-- v' = clamp(v + 0.205·(A/100)·b·n)  (n 에 큰 입자 옥타브 0.35·uGrainCoarse·snoise(0.5q+(29.3,5.9)) 추가)
-- q = 이미지 픽셀 중심 좌표/scale + off
+- v' = clamp(v + 0.205·(A/100)·b·n)  (n 은 큰 입자 옥타브 포함, §16.13)
+- q = 이미지 픽셀 중심 좌표/(scale·GRAIN_CELL) + off
 ### 5.16 S14 디더
 - pcg3d 해시
 - v8 = round(clamp(v + (n1+n2−1)/255)·255), n1 = pcg3d(x,y,0).x/2³², n2 = pcg3d(x,y,1).x/2³²
