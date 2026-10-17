@@ -29,6 +29,15 @@ export function filmShoulder(x: ArrayLike<number>, drStops: number, sceneRef: bo
   return scale3(x, (ISP_YK * Math.pow(2, up)) / Y);
 }
 
+/** D레인지 숄더 (표시 기준 소스, S6b 에서 filmShoulder 직후): Y > y0 → y0 + s·nd/√(1+nd²), 색비 보존. s ≤ 0 이면 항등 */
+export function drShoulder(x: ArrayLike<number>, y0: number, s: number): Vec3 {
+  if (!(s > 0)) return [x[0]!, x[1]!, x[2]!];
+  const Y = lumaPos(x);
+  if (Y <= y0) return [x[0]!, x[1]!, x[2]!];
+  const nd = (Y - y0) / s;
+  return scale3(x, (y0 + (s * nd) / Math.sqrt(1 + nd * nd)) / Y);
+}
+
 /** 5-2 HD 명도 곡선: L ≤ 0.70 항등, 그 위 L' = 0.70 + 0.30·(t − hd·t²(1−t)²) */
 export function hdL(L: number, hd: number): number {
   if (L <= 0.7) return L;

@@ -133,18 +133,13 @@ export const isSkinLike = (L: number, a: number, b: number): boolean => {
   return L >= 0.3 && L <= 0.9 && C >= 0.04 && C <= 0.14 && h >= 20 && h <= 70;
 };
 
-/**
- * 컬러 자동 보정. Robust Gray-World:
- *  1) 유한하고 모든 채널이 [ACA_MIN, ACA_MAX] 안인 픽셀만 유효(순백·순흑·클리핑 제외). 유효 비율 < 2% 면 null
- *  2) 유효 픽셀을 OKLab 채도 오름차순으로 정렬해 아래 50% 의 평균 RGB 를 광원 추정치로 → solveNeutralWb
- *  3) 확정 WB 를 적용한 유효 픽셀의 평균 OKLab 채도 mC, 피부톤 비율 fs 로 생동감·채도 결정:
- *     d = clamp((0.09 − mC)/0.09, −1, 1), vibrance = clamp(round(60·d), −20, 60),
- *     saturation = clamp(round(15·d·(1 − min(1, 2·fs))), −10, 15)
- */
-export function computeAutoColor(g: RgbaGrid): AutoColorResult | null {
+interface ValidPx { rgb: Rgb; c: number }
+
+/** 유한하고 모든 채널이 [ACA_MIN, ACA_MAX] 안인 픽셀(순백·순흑·클리핑 제외). 유효 비율 < 2% 면 null */
+function validPixels(g: RgbaGrid): ValidPx[] | null {
   const n = g.width * g.height;
   if (n === 0) return null;
-  const px: Array<{ rgb: Rgb; c: number }> = [];
+  const px: ValidPx[] = [];
   for (let i = 0; i < n; i++) {
     const r = g.data[i * 4]!, gg = g.data[i * 4 + 1]!, b = g.data[i * 4 + 2]!;
     if (!Number.isFinite(r) || !Number.isFinite(gg) || !Number.isFinite(b)) continue;
@@ -152,14 +147,20 @@ export function computeAutoColor(g: RgbaGrid): AutoColorResult | null {
     const lab = linToOklab([r, gg, b]) as number[];
     px.push({ rgb: [r, gg, b], c: Math.hypot(lab[1]!, lab[2]!) });
   }
-  if (px.length < ACA_MIN_FRACTION * n) return null;
+  return px.length < ACA_MIN_FRACTION * n ? null : px;
+}
+
+function wbOf(px: ValidPx[]): { temp: number; tint: number } {
   const sorted = [...px].sort((p, q) => p.c - q.c);
   const keep = Math.max(1, Math.floor(sorted.length * ACA_NEUTRAL_FRACTION));
   const mean: Rgb = [0, 0, 0];
   for (let i = 0; i < keep; i++) for (let c = 0; c < 3; c++) mean[c]! += sorted[i]!.rgb[c]!;
   for (let c = 0; c < 3; c++) mean[c]! /= keep;
   const wb = solveNeutralWb(mean);
-  const temp = wb?.temp ?? 0, tint = wb?.tint ?? 0;
+  return { temp: wb?.temp ?? 0, tint: wb?.tint ?? 0 };
+}
+
+function chromaOf(px: ValidPx[], temp: number, tint: number): { vibrance: number; saturation: number } {
   const M = wbMatrix(temp, tint);
   let sumC = 0, skin = 0;
   for (const p of px) {
@@ -170,8 +171,32 @@ export function computeAutoColor(g: RgbaGrid): AutoColorResult | null {
   const mC = sumC / px.length, fs = skin / px.length;
   const d = clamp((ACA_TARGET_CHROMA - mC) / ACA_TARGET_CHROMA, -1, 1);
   return {
-    temp, tint, used: px.length,
     vibrance: nz(normalizeValue("vibrance", clamp(Math.round(60 * d), -20, 60))),
     saturation: nz(normalizeValue("saturation", clamp(Math.round(15 * d * (1 - Math.min(1, 2 * fs))), -10, 15))),
   };
+}
+
+/** 자동 화이트밸런스: Robust Gray-World 광원 추정 → temp·tint 만 (채도·생동감은 건드리지 않는다) */
+export function computeAutoWb(g: RgbaGrid): { temp: number; tint: number; used: number } | null {
+  const px = validPixels(g);
+  return px ? { ...wbOf(px), used: px.length } : null;
+}
+
+/** 자동 채도·생동감: 현재 (temp, tint) 를 적용한 상태의 채도 분포·피부톤 비중으로 vibrance·saturation 만 결정 */
+export function computeAutoChroma(g: RgbaGrid, temp: number, tint: number): { vibrance: number; saturation: number; used: number } | null {
+  const px = validPixels(g);
+  return px ? { ...chromaOf(px, temp, tint), used: px.length } : null;
+}
+
+/**
+ * 컬러 자동 보정(WB + 채도·생동감 한 번에). Robust Gray-World:
+ *  1) 유효 픽셀(위) 2) 채도 아래 50% 평균 RGB → solveNeutralWb 3) 확정 WB 적용 후 chromaOf
+ *  d = clamp((0.09 − mC)/0.09, −1, 1), vibrance = clamp(round(60·d), −20, 60),
+ *  saturation = clamp(round(15·d·(1 − min(1, 2·fs))), −10, 15)
+ */
+export function computeAutoColor(g: RgbaGrid): AutoColorResult | null {
+  const px = validPixels(g);
+  if (!px) return null;
+  const wb = wbOf(px);
+  return { ...wb, ...chromaOf(px, wb.temp, wb.tint), used: px.length };
 }

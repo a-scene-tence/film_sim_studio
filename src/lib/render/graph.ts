@@ -441,7 +441,7 @@ export class RenderGraph {
       i: { uToneOps: c.toneOps, uLutMode: L.mode, uLutN: L.N, uLutDomain: L.domain, uLutInVR: L.inVR, uLutOutVR: L.outVR, uSceneRef: q.uSceneRef },
       f: {
         uSh: c.s.uSh, uHi: c.s.uHi, uWh: c.s.uWh, uBk: c.s.uBk, uBr: c.s.uBr, uLb: c.s.uLb, uCt: c.s.uCt, uVig: c.s.uVig, uFilmStrength: c.s.uFilmStrength,
-        uIspSd: q.uIspSd, uIspPop: q.uIspPop, uIspHd: q.uIspHd, uDrStops: q.uDrStops, uIspMh: mhT ? q.uIspMh : 0,
+        uIspSd: q.uIspSd, uIspPop: q.uIspPop, uIspHd: q.uIspHd, uDrStops: q.uDrStops, uDrY0: q.uDrY0, uDrS: q.uDrS, uIspMh: mhT ? q.uIspMh : 0,
       },
       v3: { uLutDomMin: L.min, uLutDomMax: L.max, uIspMhTint: q.uIspMhTint },
       m3: { uWsToSG3C: c.wsToSG3C },

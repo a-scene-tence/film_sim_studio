@@ -1,4 +1,5 @@
 "use client";
+import type { AutoLightMode } from "@/lib/studio/auto-light";
 import { D_RANGES, type ParamKey } from "@/lib/studio/state";
 import { useStudio } from "../StudioContext";
 import { StateSlider } from "./common";
@@ -22,21 +23,31 @@ export function DRangeSegment() {
           </button>
         ))}
       </div>
-      <p className="text-[12px] leading-snug text-[var(--text-2)]">RAW·Log 영상은 하이라이트를 더 넓게 보존합니다. JPEG 은 하이라이트 밀도만 바뀝니다.</p>
+      <p className="text-[12px] leading-snug text-[var(--text-2)]">DR200 은 Y 0.45 초과(밝은 영역), DR400 은 Y 0.30 초과(미드톤)부터 하이라이트를 부드럽게 감습니다. RAW·Log 영상은 하이라이트를 더 넓게 보존합니다.</p>
     </div>
   );
 }
 
-export function LightTab({ onAuto }: { onAuto(): void }) {
+const AUTO_MODES: ReadonlyArray<{ mode: AutoLightMode; label: string; hint: string }> = [
+  { mode: "balanced", label: "전체 평균 (균형)", hint: "중앙값·P5·P95 기준 표준 밸런스" },
+  { mode: "highlight", label: "하이라이트 우선", hint: "밝은 영역 보호 + DR 연동" },
+  { mode: "shadow", label: "암부·역광 우선", hint: "어두운 피사체 디테일 복원" },
+];
+
+export function LightTab({ onAuto }: { onAuto(mode: AutoLightMode): void }) {
   const { asset, renderer } = useStudio();
   return (
     <div className="flex flex-col">
-      <button
-        type="button" disabled={!asset || !renderer} onClick={onAuto}
-        className="mb-1 h-11 w-full rounded-[10px] border border-[var(--accent)] text-[14px] font-semibold text-[var(--accent)] disabled:opacity-40"
-      >
-        자동 보정
-      </button>
+      <div className="mb-1 grid grid-cols-3 gap-1" role="group" aria-label="라이트 자동 보정">
+        {AUTO_MODES.map((m) => (
+          <button
+            key={m.mode} type="button" disabled={!asset || !renderer} onClick={() => onAuto(m.mode)} title={m.hint}
+            className="min-h-11 rounded-[10px] border border-[var(--accent)] px-1 text-[13px] font-semibold leading-tight text-[var(--accent)] disabled:opacity-40"
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
       <DRangeSegment />
       {KEYS.map((k) => <StateSlider key={k} k={k} />)}
     </div>

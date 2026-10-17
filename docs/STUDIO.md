@@ -146,11 +146,11 @@ FSE-v2: 그 밖에 `dRange`(D레인지 100/200/400, 라이트 탭 세그먼트, 
 - 이미 선택된 필름 카드를 다시 탭하면 `selectFilm(같은 id)` + 토스트 "{필름 한글명} 기본 보정을 다시 적용했습니다" (FilmTab). 히스토리에 1단계로 남는다(값이 달라졌을 때만).
 - `resetForNewMedia()`: simId null, NEUTRAL_PRESET, filmStrength 100, monoHue 0, monoAmount 0, 입력 색공간 Auto. 데모는 이어서 `selectFilm('fuji-classic-chrome')` 만.
 - 더블탭 기본값 `defaultFor(key, simId)` = 현재 필름(없으면 NEUTRAL) 프리셋 값. 프리셋 밖 키(필름 강도·흑백 조색)는 §6 기본값.
-- 자동 보정(FLA-v1)은 라이트 8개 값만 바꾼다. 커스텀 레시피 적용은 레시피 값으로 전체 교체(selectFilm 을 거치지 않음, dRange 포함, v1 레시피는 dRange 100).
+- 라이트 자동 보정은 3모드(전체 평균 / 하이라이트 우선 / 암부·역광 우선, COLOR_SCIENCE §16.12)로 라이트 8개 값을 바꾸며 하이라이트 우선만 D레인지를 함께 정한다. 컬러 자동 보정은 [자동 화이트밸런스](temp·tint)와 [자동 채도·생동감](vibrance·saturation)으로 분리(§16.12b). 디테일 탭 그레인은 OFF/약·소/약·대/강·소/강·대 원터치 + 슬라이더(§16.13). 커스텀 레시피 적용은 레시피 값으로 전체 교체(selectFilm 을 거치지 않음, dRange 포함, v1 레시피는 dRange 100).
 - 썸네일(필름 카드)도 `selectFilm` 으로 렌더하므로 프리셋이 반영된 모습이다.
 
 ### UI 변경 (지시서 6-4)
-- [라이트] 탭: [자동 보정] 바로 아래 "D레인지" 세그먼트 [DR100] [DR200] [DR400] + 보조 문구 "RAW·Log 영상은 하이라이트를 더 넓게 보존합니다. JPEG 은 하이라이트 밀도만 바뀝니다."
+- [라이트] 탭: 자동 보정 3버튼 바로 아래 "D레인지" 세그먼트 [DR100] [DR200] [DR400] + 보조 문구 "RAW·Log 영상은 하이라이트를 더 넓게 보존합니다. JPEG 은 하이라이트 밀도만 바뀝니다."
 - 모든 슬라이더 트랙의 프리셋 값 위치에 2×10px 눈금(var(--text-2), `data-preset-tick`). 조건: simId ≠ null 이고 `defaultFor(key) ≠ NEUTRAL_PRESET[key]` (`presetTick`). 값 숫자는 defaultFor 와 다를 때 accent.
 - [필름] 탭: 상단 "카메라 렌더링 근사", 필름 강도 아래 "필름 강도는 색(LUT)과 카메라 렌더링(ISP) 세기를 조절합니다. 상세 보정 값은 각 탭에서 조정하세요."
 - 히스토리 라벨에 "D레인지" 추가.
