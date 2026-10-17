@@ -160,7 +160,8 @@ describe("컬러 자동 보정 ACA-v1", () => {
 
   it("피부톤이 많으면 채도 증가를 억제한다", () => {
     const skin: [number, number, number] = [0.45, 0.25, 0.17];
-    const g = grid(16, 16, () => skin);
+    // 절반은 중성 회색(광원 추정의 기준), 절반은 피부톤: WB 가 피부색까지 중성화하지 못하도록 섞는다
+    const g = grid(16, 16, (x) => (x < 8 ? [0.3, 0.3, 0.3] : skin));
     const gray = grid(16, 16, () => [0.3, 0.3, 0.3]);
     const a = computeAutoColor(g)!, b = computeAutoColor(gray)!;
     expect(a.saturation).toBeLessThan(b.saturation);

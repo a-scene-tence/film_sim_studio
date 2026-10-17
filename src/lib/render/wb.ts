@@ -70,9 +70,16 @@ const xyzFromXy = (x: number, y: number): [number, number, number] => [x / y, 1,
 
 const D65_XY: [number, number] = [0.3127, 0.329];
 
+/** 색온도 슬라이더 1단위당 미레드 이동량: 음수(차갑게)는 텅스텐 조명까지, 양수(따뜻하게)는 푸른 그늘까지 덮는다 */
+export const WB_MIRED_PER_UNIT_COOL = 2.0;
+export const WB_MIRED_PER_UNIT_WARM = 1.1;
+/** 틴트 ±100 의 CIE1960 uv 이동량 (Δuv) */
+export const WB_TINT_DUV = 0.05;
+
 /** COLOR_SCIENCE §8.1 M_wb (709 선형 → 709 선형), temp·tint ∈ [−100, 100] */
 export function wbMatrix(temp: number, tint: number): Mat3 {
-  const Ts = Math.min(25000, Math.max(2000, 1e6 / (1e6 / 6504 - 0.9 * temp)));
+  const miredShift = temp < 0 ? WB_MIRED_PER_UNIT_COOL * temp : WB_MIRED_PER_UNIT_WARM * temp;
+  const Ts = Math.min(25000, Math.max(2000, 1e6 / (1e6 / 6504 - miredShift)));
   const d65 = uvFromXy(D65_XY[0], D65_XY[1]);
   const L = locusUv(Ts);
   const L0 = locusUv(6504);
@@ -82,7 +89,7 @@ export function wbMatrix(temp: number, tint: number): Mat3 {
   const t: UV = [(a[0] - b[0]) / tl, (a[1] - b[1]) / tl];
   let n: UV = [-t[1], t[0]];
   if (n[1] < 0) n = [-n[0], -n[1]];
-  const us: UV = [d65[0] + L[0] - L0[0] + (tint / 100) * 0.02 * n[0], d65[1] + L[1] - L0[1] + (tint / 100) * 0.02 * n[1]];
+  const us: UV = [d65[0] + L[0] - L0[0] + (tint / 100) * WB_TINT_DUV * n[0], d65[1] + L[1] - L0[1] + (tint / 100) * WB_TINT_DUV * n[1]];
   const [sx, sy] = xyFromUv(us[0], us[1]);
   const rs = apply3(M_BRADFORD, xyzFromXy(sx, sy));
   const rd = apply3(M_BRADFORD, xyzFromXy(D65_XY[0], D65_XY[1]));

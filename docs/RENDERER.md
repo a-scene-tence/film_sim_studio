@@ -139,8 +139,8 @@ S14 디더·출력
 ### 5.15 S13 은염 클럼핑 그레인
 - Ashima/Gustavson 2D 심플렉스(webgl-noise MIT, permute 계수 +10.0)
 - n = (0.72·snoise(q) + 0.28·snoise(2.03q + (17.13,41.71)))·(0.65 + 0.35·snoise(0.37q + (3.7,9.1)))
-- 루미넌스 벨 커브 마스크 b(vl) = sqrt(4·vl·(1−vl)), vl = luma709(v)
-- v' = clamp(v + 0.07·(A/100)·b·n)
+- 루미넌스 마스크 b(vl) = 0.4 + 0.6·sqrt(4·vl·(1−vl)), vl = luma709(v) (바닥값 0.4)
+- v' = clamp(v + 0.205·(A/100)·b·n)  (n 에 큰 입자 옥타브 0.35·uGrainCoarse·snoise(0.5q+(29.3,5.9)) 추가)
 - q = 이미지 픽셀 중심 좌표/scale + off
 ### 5.16 S14 디더
 - pcg3d 해시
@@ -217,9 +217,9 @@ S14 디더·출력
      A 는 (소스, WB, 노출, HDF) 서명이 바뀔 때만 다시 계산한다(디헤이즈 슬라이더 변경 시 재계산 없음).
    - 비디오: 섹션 10.6
 5. 그레인 유니폼
-   - outLong = 출력 이미지 장축(사진 displaySize, 비디오 표시 크기, 타일 = 내보내기 출력 크기)
-   - g0 = max(1, outLong/3000), scale = g0·(1 + 1.5·Sz/100)
-   - 미리보기 f = outLong/R_long, uGrainScale = max(0.5, scale/f). 타일은 uGrainScale = scale.
+   - outShort = 출력 이미지 짧은 변(사진 displaySize, 비디오 표시 크기, 타일 = 내보내기 출력 크기)
+   - scale = max(0.25, outShort/1080)·mul(Sz) (mul: 0→1.0, 50→1.65, 100→2.5), uGrainCoarse = Sz/100 (COLOR_SCIENCE §11)
+   - 미리보기 f = outShort/R_short, uGrainScale = max(0.5, scale/f). 타일은 uGrainScale = scale.
    - seed: 사진 0, 비디오 round(mediaTime·fps)
    - uGrainOff = (frac(seed·0.754877666)·1000, frac(seed·0.569840291)·1000) (CPU double 로 계산)
 6. HDF 유니폼

@@ -84,7 +84,7 @@ describe("T9 selectFilm / defaultFor (FSE-v2 §6-3, 상세 골든은 tests/fse2.
     expect(defaultFor("filmStrength", "fuji-provia")).toBe(100);
     expect(defaultFor("hdfStrength", "ricoh-retro")).toBe(50);
     expect(defaultFor("zone2", "ricoh-retro")).toBe(0);
-    expect(defaultFor("grainAmount", "fuji-acros")).toBe(28);
+    expect(defaultFor("grainAmount", "fuji-acros")).toBe(40);
     expect(defaultFor("clarity", "ricoh-hdr-tone")).toBe(70);
   });
   it("커브: 프리셋 판별과 CurveState 왕복", () => {

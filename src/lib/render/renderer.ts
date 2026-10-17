@@ -11,13 +11,13 @@ import { RenderGraph, type ChainParams, type HistPixels, type LutUniforms, type 
 import { DOMAIN_INDEX, listStoreLuts, loadBuiltinLut, loadManifest, loadStoreLut, storeSourceProfile, type CpuLut, type LutManifest, type ManifestSim, type StoreLut } from "./luts";
 import { DEFAULT_PARAMS, effectiveParams, scalarUniforms, toneOpsOn, type Effective, type RenderParams } from "./params";
 import { ispUniforms, type IspUniforms } from "./isp";
-import { grainOffset, grainScaleFull, grainScalePreview, hdfPlan, mhPlan, scaledSize, tilePadding, graphSizes, type Size } from "./plan";
-import type { LutStageRef, NormalizeCtx, PixelCtx } from "./reference";
+import { grainCoarse, grainOffset, grainScaleFull, grainScalePreview, hdfPlan, mhPlan, scaledSize, tilePadding, graphSizes, type Size } from "./plan";
+import { pixelPipelineFromWs, type LutStageRef, type NormalizeCtx, type PixelCtx } from "./reference";
 import { toneInvTable, TONE_INV_N } from "./tone-inv-table";
 import { probeVideoOrientation, type OrientationProbeResult } from "./video-orientation-probe";
 import { VideoSource, type VideoStats } from "./video-source";
 import { p3Available, type OutputSpace } from "./output-space";
-import { colMajor, IDENTITY3, inv3, wbMatrix, type Mat3 } from "./wb";
+import { apply3, colMajor, IDENTITY3, inv3, wbMatrix, type Mat3 } from "./wb";
 
 export type { RendererCaps } from "./gl";
 
@@ -551,10 +551,10 @@ export class FilmRenderer {
     return scaledSize(disp, rLong);
   }
 
-  /** 출력 이미지 장축 (그레인 g0 기준) */
-  private outLong(): number {
+  /** 출력 이미지 짧은 변 (그레인 크기 기준: 1080 프레임 정규화) */
+  private outShort(): number {
     const d = this.displaySize()!;
-    return Math.max(d.width, d.height);
+    return Math.min(d.width, d.height);
   }
 
   private chainParams(R: Size, renderScale: number = this.previewScale(R)): ChainParams {
@@ -575,7 +575,7 @@ export class FilmRenderer {
       curve: this.curve(),
       lut: this.lutUniforms(),
       wsToSG3C: colMajor(inv3(matrixToWS("s-gamut3-cine") as Mat3)),
-      grain: { scale: grainScalePreview(this.outLong(), Math.max(R.width, R.height), e.adjust.grainSize), off: grainOffset(seed) },
+      grain: { scale: grainScalePreview(this.outShort(), Math.min(R.width, R.height), e.adjust.grainSize), off: grainOffset(seed), coarse: grainCoarse(e.adjust.grainSize) },
       hdfPlan: hdfPlan(R),
       isp,
       mhPlan: mhPlan(R),
@@ -785,6 +785,21 @@ export class FilmRenderer {
     }
   }
 
+  /**
+   * WB 스포이트용: Pre-WB(WS 선형) 표본 + 표본 위치 (u,v) → (temp, tint) 에서의 최종 표시 RGB.
+   * 현재 필름 LUT·ISP 숄더·강도 혼합·톤 커브·채도·비네팅 등 픽셀 단계 전체(CPU 참조)를 통과시키고, 그레인은 끈다.
+   */
+  wbOutputEval(sample: [number, number, number], u: number, v: number): (temp: number, tint: number) => number[] {
+    const { ctx, R } = this.referenceContext({ grainAmount: 0 });
+    const expGain = ctx.norm.expGain;
+    const pxX = Math.min(R.width - 1, Math.floor(u * R.width)) + 0.5, pxY = Math.min(R.height - 1, Math.floor(v * R.height)) + 0.5;
+    return (temp, tint) => {
+      const m = wbMatrix(temp, tint);
+      const x = apply3(m, sample).map((q) => q * expGain);
+      return Array.from(pixelPipelineFromWs(x, u, v, pxX, pxY, { ...ctx, grain: null }));
+    };
+  }
+
   /** 프로브와 같은 조건의 CPU 참조 컨텍스트 (섹션 15.1) */
   referenceContext(override: ProbeOverride = { grainAmount: 0 }): { ctx: PixelCtx; R: Size } {
     if (!this.asset) throw renderErrors.noSource();
@@ -806,7 +821,7 @@ export class FilmRenderer {
         curve: curveOn(this.params.curve) ? this.curveTable : null,
         sat: s.uSat, vib: s.uVib, filmStrength: s.uFilmStrength, monoTint: s.uMonoTint,
         isp: (() => { const q = this.ispFor(1); return { drStops: q.uDrStops, sceneRef: q.uSceneRef, hd: q.uIspHd }; })(),
-        grain: s.uGrainAmt > 0 ? { amount: s.uGrainAmt, scale: grainScalePreview(this.outLong(), Math.max(R.width, R.height), e.adjust.grainSize), off: grainOffset(0) } : null,
+        grain: s.uGrainAmt > 0 ? { amount: s.uGrainAmt, scale: grainScalePreview(this.outShort(), Math.min(R.width, R.height), e.adjust.grainSize), off: grainOffset(0), coarse: grainCoarse(e.adjust.grainSize) } : null,
       };
       return { ctx, R };
     } finally {
@@ -844,7 +859,7 @@ export class FilmRenderer {
       const base = this.chainParams(this.lastR, outScale);
       const e = this.effective();
       base.R = Rt;
-      base.grain = { scale: grainScaleFull(Math.max(outFull.width, outFull.height), e.adjust.grainSize), off: grainOffset(0) };
+      base.grain = { scale: grainScaleFull(Math.min(outFull.width, outFull.height), e.adjust.grainSize), off: grainOffset(0), coarse: grainCoarse(e.adjust.grainSize) };
       const out = this.graph.renderTile({
         base, R: Rt, imageSize: outFull, tileOrigin: [px0, py0], crop: [rect.x - px0, rect.y - py0], imgPxOrigin: [rect.x, rect.y],
         out: { width: rect.width, height: rect.height }, hdfPlan: hdfPlan(outFull), mhPlan: mhPlan(outFull), atm: this.atm,

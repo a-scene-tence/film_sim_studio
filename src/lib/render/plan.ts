@@ -69,15 +69,29 @@ export function grainOffset(seed: number): [number, number] {
   return [frac(seed * 0.754877666) * 1000, frac(seed * 0.569840291) * 1000];
 }
 
-/** 섹션 8.5: g0 = max(1, outLong/3000), scale = g0·(1 + 1.5·Sz/100) */
-export function grainScaleFull(outLong: number, size: number): number {
-  return Math.max(1, outLong / 3000) * (1 + (1.5 * size) / 100);
+/** 그레인 기준 프레임: 출력 이미지의 짧은 변을 이 값으로 정규화해 입자 크기를 해상도와 무관하게 만든다 */
+export const GRAIN_REF_SHORT = 1080;
+
+/** 그레인 크기 배율: 작게 1.0× · 중간 1.65× · 크게 2.5× (슬라이더 0 / 50 / 100, 구간 선형) */
+export function grainSizeMul(size: number): number {
+  const s = Math.min(100, Math.max(0, size));
+  return s <= 50 ? 1 + (0.65 * s) / 50 : 1.65 + (0.85 * (s - 50)) / 50;
 }
 
-/** 미리보기: f = outLong/R_long, uGrainScale = max(0.5, scale/f) */
-export function grainScalePreview(outLong: number, rLong: number, size: number): number {
-  const f = outLong / rLong;
-  return Math.max(0.5, grainScaleFull(outLong, size) / f);
+/** 큰 입자 옥타브 가중치 0..1 (크기 슬라이더 0 → 0, 100 → 1) */
+export function grainCoarse(size: number): number {
+  return Math.min(1, Math.max(0, size / 100));
+}
+
+/** scale = (출력 짧은 변 / 1080) · grainSizeMul(Sz). 출력 px 단위의 노이즈 한 칸 크기 */
+export function grainScaleFull(outShort: number, size: number): number {
+  return Math.max(0.25, outShort / GRAIN_REF_SHORT) * grainSizeMul(size);
+}
+
+/** 미리보기: f = outShort/R_short, uGrainScale = max(0.5, scale/f) */
+export function grainScalePreview(outShort: number, rShort: number, size: number): number {
+  const f = outShort / rShort;
+  return Math.max(0.5, grainScaleFull(outShort, size) / f);
 }
 
 /** 섹션 12: 패딩 P = ceil(3·σc_out) + 8 */

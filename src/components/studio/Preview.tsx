@@ -35,11 +35,13 @@ export interface PreviewProps {
   /** WB 스포이트 모드: 줌/팬/비교 대신 탭 지점을 onPick(u, v) 로 알린다 (u,v = 표시 이미지 정규화 좌표) */
   picking?: boolean;
   onPick?(u: number, v: number): void;
+  /** 스포이트로 찍은 지점 표시 (u,v = 표시 이미지 정규화 좌표). null 이면 숨김 */
+  pickMarker?: { u: number; v: number; key: number } | null;
   children?: React.ReactNode;
 }
 
 export function Preview(props: PreviewProps) {
-  const { canvasRef, renderer, asset, hdf, onToggleHdf, compare, onCompare, editKey, disabled, pauseVideoSignal, picking = false, onPick, children } = props;
+  const { canvasRef, renderer, asset, hdf, onToggleHdf, compare, onCompare, editKey, disabled, pauseVideoSignal, picking = false, onPick, pickMarker = null, children } = props;
   const box = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [zoom, setZoom] = useState<ZoomState>(ONE);
@@ -177,6 +179,15 @@ export function Preview(props: PreviewProps) {
     >
       <div className="absolute inset-0" style={{ transform: `translate(${zoom.t.x}px, ${zoom.t.y}px) scale(${zoom.z})`, transformOrigin: "50% 50%", willChange: "transform" }}>
         <canvas ref={canvasRef} style={canvasStyle} aria-label="미리보기" />
+        {fit && pickMarker ? (
+          <div
+            key={pickMarker.key} aria-hidden className="pointer-events-none absolute rounded-full"
+            style={{
+              left: (size.w - fit.bw) / 2 + pickMarker.u * fit.bw - 18, top: (size.h - fit.bh) / 2 + pickMarker.v * fit.bh - 18, width: 36, height: 36,
+              border: "2px solid #fff", boxShadow: "0 0 0 1.5px rgba(0,0,0,0.7), inset 0 0 0 1.5px rgba(0,0,0,0.7)", transform: `scale(${1 / zoom.z})`,
+            }}
+          />
+        ) : null}
       </div>
       {asset && renderer && geometry ? <DetailOverlay renderer={renderer} asset={asset} zoom={zoom} geometry={geometry} editKey={editKey} /> : null}
       {asset ? <Histogram renderer={renderer} tick={editKey} playing={playing} active={!disabled} key={assetId ?? "none"} /> : null}
