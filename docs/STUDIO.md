@@ -16,7 +16,7 @@
 | (C) 회전·반전 → orientation | — | **신규** `rotationToOrientation(rotation, flip)` (export/video-plan.ts) | 지시서 대조표와 같고, `orientationFromMatrix` 의 tkhd 표와 일치함을 테스트로 고정 |
 | (D) 입력 바인딩 | resolveInputBinding | **추출** `resolveInputBinding(descriptor, userLut)` (render/binding.ts) | 기존 renderer.ts 의 private `profileIndex`/`normalizeUniforms` 를 순수 함수로 뺌 |
 | (E) 렌더 파라미터 | RenderParams, buildUniforms | `RenderParams`, `effectiveParams`, `scalarUniforms` (render/params.ts) + **신규** `buildRenderParams(EditState)`, `buildUniforms(EditState, mono)` (studio/uniforms.ts) | `RenderParams.absolute` 추가(아래 §6-3) |
-| (F) 레시피 조회 | simRecipe | `recipeFor(simId)` (render/recipes.ts) + manifest `mono` → **신규** `simRecipe(simId, sims)` (studio/state.ts) | 마스터 레시피 표가 manifest shaderHints 를 이미 포함하므로 shaderHints 를 따로 읽지 않는다 |
+| (F) 필름 조회 | simRecipe | `simRecipe(simId, sims)` → `{ brand, mono, ko }` (studio/state.ts, manifest 기반) | FSE-v2: 숨은 레시피 표(recipeFor)·shaderHints 삭제, 필름 프리셋은 §FSE-v2 매핑 참고 |
 | (G) 그레인 | — | `grainScalePreview/grainScaleFull(outLong, …, size)`, `grainOffset(seed)` (render/plan.ts) | |
 | (H) 사용자 소스 LUT | — | lutStore (`putLut/getLut/listLuts/deleteLut`) + **신규** `registerSourceLut/findSourceLut/removeSourceLut` (lut/sourceLut.ts) | role "source-transform", sourceProfile "samsung-log" / "dji-dlog-m" |
 | (I) 미디어 로더 | — | `loadMedia(file, cb) → MediaAsset { kind, proxy, exif, descriptor, detection, histogram, … }` (media-loader.ts) | |
@@ -50,20 +50,17 @@ Step 3 톤 커브 프리셋 키는 지시서의 표기와 달라 실제 키를 �
 
 키는 29개(24 + zone 5). `hdf` 는 토글(기본 false), 곡선은 `curve { preset, points, zones }`. 부호는 U+2212.
 
-### 필름 연동 키 (`simDefaults(simId, iso)`) — FSE-v2 에서 비어 있음
-FSE-v2 부터 Step 3 마스터 레시피(render/recipes.ts)는 모든 시뮬레이션에서 중립(0/끔)이라 연동 키가 없다(`simDefaults` = `{}`).
-필름을 고르면 상세 조정 슬라이더(선명도·명료도·하이라이트·쉐도우·비네팅·그레인·컬러 크롬·HDF)는 건드리지 않고 그대로 두며,
-톤·색 성격은 3D LUT 만으로 낸다(LUT 위 이중 적용 = 떡보정 금지, COLOR_SCIENCE §15). 슬라이더 더블탭은 `defaultFor(key, simId)` = §6 기본값으로 돌아간다.
-`selectSim(next)` 은 연동 키 ∪ 규칙을 유지하므로 레시피 표에 값을 다시 넣으면 그대로 연동된다.
+FSE-v2: 그 밖에 `dRange`(D레인지 100/200/400, 라이트 탭 세그먼트, 기본 100)를 슬라이더가 아닌 `EditState.dRange` 로 따로 둔다(`normalizeDRange`).
 
-### 새 미디어 열기 = 완전 초기화 (`mediaOpenState(demo)`, Studio.openFile)
+### 필름 선택 = 프리셋으로 통째로 교체 (FSE-v2, `selectFilm`) — 아래 "§FSE-v2" 절 참고
+### 새 미디어 열기 = 완전 초기화 (`resetForNewMedia()` / `mediaOpenState(demo)`, Studio.openFile)
 사용자 파일(사진·RAW·동영상)을 열면 이전 미디어의 편집 내역을 하나도 이어받지 않는다.
-- 편집 상태: `initialEditState()` — 필름 없음(원본, simId null), 필름 강도 100%, 모든 슬라이더 §6 기본값(0, 확산 강도 100%), HDF 끔, 톤 커브 linear·구간 0.
+- 편집 상태: `resetForNewMedia()` — 필름 없음(simId null), NEUTRAL_PRESET(모든 보정 0, 확산 강도 100%, HDF 끔, 톤 커브 linear, DR100), 필름 강도 100%, 흑백 조색 0.
 - 뷰: 줌/팬 1×(Preview 가 asset.id 변경 시), 원본 비교 끔, WB 스포이트 끔, 입력 색공간 자동.
 - 히스토리: `reset` 으로 past/future/드래그 대기 상태를 비우고 타임라인은 "초기 상태" 1개만 남는다.
-- 데모 사진만 소개용으로 클래식 크롬 + HDF 로 시작한다(`DEMO_SIM_ID`).
+- 데모 사진은 `resetForNewMedia()` 다음 `selectFilm('fuji-classic-chrome')` 만 실행한다(이전의 HDF 강제는 삭제).
 
-**절대 모드(`RenderParams.absolute = true`)**: Step 3 `effectiveParams` 는 레시피를 숨은 레이어로 사용자 값에 더한다(FSE-v2 에서는 레시피가 중립이라 더해지는 값이 0). 스튜디오는 절대 모드에서 레시피를 더하지 않는다. `absolute = false`(기본)는 Step 3 동작 그대로이고 /lab/renderer 가 쓴다.
+**절대 모드(`RenderParams.absolute = true`)**: 스튜디오는 슬라이더 값이 곧 실효값이다. FSE-v2 에서 숨은 레시피 레이어는 삭제되어 `absolute = false`(/lab/renderer)도 사용자 값을 clamp 할 뿐 아무것도 더하지 않는다. /lab/renderer 는 필름 프리셋을 적용하지 않고 LUT·ISP 만 보여 준다(프리셋 값은 칩 아래 작은 글씨로 표시).
 
 ## §7 레이아웃 치수
 - 루트: position fixed, inset 0, 100dvh, 좌우 padding env(safe-area-inset-*).
@@ -126,3 +123,58 @@ FSE-v2 부터 Step 3 마스터 레시피(render/recipes.ts)는 모든 시뮬레�
 - **EXIF 필름 프레임** (`src/lib/export/frame.ts`, `frame-render.ts`): 저장 모달의 `EXIF 여백 프레임 추가` 토글(기본 OFF). 배경 화이트/블랙, 하단 여백형/4면 폴라로이드형. 1줄 = 바디·렌즈, 2줄 = 초점거리·조리개·셔터·ISO·촬영일시 + 필름 배지(예: `RICOH Positive Film + HDF`). 합성은 export 워커에서 하고(시스템 폰트만 사용), 원본 EXIF 는 그대로 재삽입하며 PixelXDimension/YDimension 만 프레임 포함 크기로 갱신, Orientation=1.
 - **동영상**: 오디오 트랙이 없거나 오디오 코덱 탐지가 실패해도 저장을 거부하지 않고 비디오만 인코딩한다. MediaRecorder 폴백은 `video/mp4;codecs=avc1,mp4a.40.2` → `video/mp4;codecs=hvc1` → `video/mp4` 를 먼저 시도하고 MP4 가 전혀 안 될 때만 `.webm`.
 - **Display P3 출력** (`src/lib/render/output-space.ts`): `(color-gamut: p3)` 와 WebGL2 `drawingBufferColorSpace='display-p3'` 가 모두 가능할 때만 헤더에 `sRGB / P3` 전환이 나타난다. 기본값은 sRGB 이며(GPU↔CPU 기준값 불변), P3 는 화면(캔버스) 출력에만 적용되는 색역 표현 변환(선형 sRGB→선형 P3 행렬, 전달함수 동일)이다. 렌더 수식·LUT 는 바꾸지 않으므로 색 자체는 같고, 저장 파일은 항상 sRGB 다. 색역 확장(P3 안쪽까지 쓰는 LUT/gamutMap)은 COLOR_SCIENCE 수식 확정이 필요해 이번 범위에서 제외했다.
+
+## §FSE-v2 카메라 렌더링 업그레이드 (ISP 6단계 + 32종 필름 프리셋 + 색 전용 LUT)
+
+수식·상수·골든은 docs/COLOR_SCIENCE.md §17(계약)·§18(LUT 커널)·§19(Camera ISP)·§20(Film Presets) 이 정본이다.
+
+### §FSE-v2 매핑 (지시서 2-3, 실제 파일·함수)
+| 항목 | 지시서 이름 | 실제 위치 (업그레이드 전 → 후) |
+|---|---|---|
+| (A) 필름 선택 시 슬라이더 0 고정 | — | 전: `simDefaults()` + `selectSim()`(부분 덮어쓰기) — src/lib/studio/state.ts, 전부 중립인 `RECIPES` 표 + `recipeFor()` — src/lib/render/recipes.ts, 숨은 레시피 레이어 — `effectiveParams` (render/params.ts). 후: **모두 삭제**, `selectFilm()` 이 FILM_PRESETS 로 통째로 교체 |
+| (B) LUT 대비·채도 축소 | — | 전: src/lib/color/fse/film-params.mjs 의 필름별 tone{a,d,hdrMax,midOut}·sat·desat·fade(이전 재튜닝 값) + engine.mjs `filmTone`(톤 소프트 니)·`skinWeight`(피부 보호)·`renderPoint`, constants.mjs KNEE_*/SKIN_*/DESAT_*/SPLIT_* → scripts/generate-luts.mjs 가 renderPoint 로 굽기. 후: **모두 삭제**, film-params 는 메타데이터만, scripts/fse2-kernel.mjs `renderPoint2(x, SIMS2[id])` 로 굽기 |
+| (C) 편집 상태·필름 선택·새 파일 초기화 | EditState, selectSim | `EditState`(+`dRange`), 리듀서 `editReducer` 의 `{ type: "selectFilm", simId }`·`{ type: "setDRange" }`, `selectFilm`, `resetForNewMedia`, `mediaOpenState(demo)`(Studio.openFile 에서 호출) — src/lib/studio/state.ts. 키 대응 `presetToState`·`stateKeyOf`·`CURVE_ID` 도 같은 파일 |
+| (D) 렌더 파라미터 → 유니폼 | buildUniforms | `buildRenderParams`/`buildUniforms` (studio/uniforms.ts, `dRange` 추가) → `RenderParams.dRange` → `FilmRenderer.ispFor(renderScale)` → `ispUniforms()` (render/isp.ts) → `ChainParams.isp` → `RenderGraph.mainPass/normalize/finalPass` (render/graph.ts) |
+| (E) HDF core 블러 패스 | — | `RenderGraph.hdf()` (graph.ts): L1 = `fs_hdf_extract`(반 해상도) → `fs_down2` 피라미드 → `fs_gauss`(반경 ≤ 12) 가로·세로, 레벨 규칙 `blurLevel()`/`hdfPlan()` (render/plan.ts). MH 는 같은 구조의 `RenderGraph.mh()` + `mhPlan()` (공용 `gauss2()`) |
+| (F) guided filter / blurL 조건 | uToneOps, fs_blurL | 전: `toneOpsOn(e)`(슬라이더 6개 중 하나라도 ≠ 0), `sharpenBlur()` = `uSharpen > 0`. 후: `toneOpsOn(e) \|\| uIspSd > 0 \|\| uIspPop > 0` (renderer.chainParams), `uSharpen > 0 \|\| uIspEs > 0` (graph.sharpenBlur) |
+| (G) 셰이더 프로그램 목록·컴파일 테스트 | — | `PASS_BODIES`/`PASS_NAMES` (render/glsl/index.ts) 16 → **17개**(`mh_extract`), tests/render.shaders.test.ts(glslangValidator), tests/step4.render.test.ts |
+| (H) 필름 메타데이터 | simRecipe | `simRecipe(simId, sims)` → `{ brand, mono, ko }` (studio/state.ts), 렌더러는 `simMeta()?.brand` |
+| (I) 커브 프리셋 | Step 3 PRESETS | `CURVE_PRESETS` (render/curve.ts): linear, weak-contrast, strong-contrast, matte, soft-highlight. 프리셋 id 대응 medium→weak-contrast, strong→strong-contrast, softHighlight→soft-highlight |
+
+### 선택 규칙 (지시서 6-3)
+- `selectFilm(id)`: id ≠ null 이면 PRESET_KEYS 24개를 FILM_PRESETS[id] 로 통째로 교체, null 이면 NEUTRAL_PRESET. 이전 필름의 값은 남지 않는다. filmStrength·monoHue·monoAmount·입력 색공간은 그대로.
+- 이미 선택된 필름 카드를 다시 탭하면 `selectFilm(같은 id)` + 토스트 "{필름 한글명} 기본 보정을 다시 적용했습니다" (FilmTab). 히스토리에 1단계로 남는다(값이 달라졌을 때만).
+- `resetForNewMedia()`: simId null, NEUTRAL_PRESET, filmStrength 100, monoHue 0, monoAmount 0, 입력 색공간 Auto. 데모는 이어서 `selectFilm('fuji-classic-chrome')` 만.
+- 더블탭 기본값 `defaultFor(key, simId)` = 현재 필름(없으면 NEUTRAL) 프리셋 값. 프리셋 밖 키(필름 강도·흑백 조색)는 §6 기본값.
+- 자동 보정(FLA-v1)은 라이트 8개 값만 바꾼다. 커스텀 레시피 적용은 레시피 값으로 전체 교체(selectFilm 을 거치지 않음, dRange 포함, v1 레시피는 dRange 100).
+- 썸네일(필름 카드)도 `selectFilm` 으로 렌더하므로 프리셋이 반영된 모습이다.
+
+### UI 변경 (지시서 6-4)
+- [라이트] 탭: [자동 보정] 바로 아래 "D레인지" 세그먼트 [DR100] [DR200] [DR400] + 보조 문구 "RAW·Log 영상은 하이라이트를 더 넓게 보존합니다. JPEG 은 하이라이트 밀도만 바뀝니다."
+- 모든 슬라이더 트랙의 프리셋 값 위치에 2×10px 눈금(var(--text-2), `data-preset-tick`). 조건: simId ≠ null 이고 `defaultFor(key) ≠ NEUTRAL_PRESET[key]` (`presetTick`). 값 숫자는 defaultFor 와 다를 때 accent.
+- [필름] 탭: 상단 "카메라 렌더링 근사", 필름 강도 아래 "필름 강도는 색(LUT)과 카메라 렌더링(ISP) 세기를 조절합니다. 상세 보정 값은 각 탭에서 조정하세요."
+- 히스토리 라벨에 "D레인지" 추가.
+
+### 직전 작업 (A)·(B) 를 대체한 내역
+- (A) "필름 선택 시 상세 보정 0 고정" → FILM_PRESETS 통째 교체(`selectFilm`). `simDefaults`/`selectSim`/중립 `RECIPES`/`recipeFor`/params 의 레시피 덧셈은 남기지 않았다(`acrosGrain`·`Recipe` 타입만 render/recipes.ts 에 유지, 프리셋 re-export).
+- (B) "LUT 대비·채도 축소" → 필름별 톤을 LUT 에서 완전히 빼고(공통 T_ref), 색은 FSE-v2 색 전용 커널로 32종 재생성. 톤·채도 성격은 프리셋 슬라이더(대비·커브·채도·검정)와 카메라 ISP 가 담당한다.
+
+### 5-7 셰이더 패치 적용 메모
+- 5-7-1~8 의 찾기 문자열은 모두 현재 코드에 정확히 1회 있어 원문 그대로 적용했다(의미 기준 대체 없음).
+- 별도 수치 안전 수정: common.glsl gamutMap 의 `tanh((C − t)/r)` → `tanh(min((C − t)/r, 15.0))`. L ≈ 1 에서 r 이 아주 작으면 GPU tanh 가 NaN 이 되어 선명도(또는 ES)가 켜진 흰색 하이라이트 안에 회색 줄·점이 생기던 기존 버그(main 에서도 선명도 40 으로 재현). float32 에서 결과는 같다.
+
+### §9 수동 검증 표 (FSE-v2)
+환경: 컨테이너 Chromium(헤드리스, SwiftShader WebGL2), `npm run build` 후 `node scripts/serve-out.mjs 4173`, Playwright 스크립트. 비교 기준은 같은 환경에서 빌드한 업그레이드 직전 커밋(fa5d4ed). 실기·실제 촬영 데이터가 필요한 항목은 "사용자 확인 필요".
+
+| # | 입력 | 절차 | 기대 | 결과 |
+|---|---|---|---|---|
+| 1 | 스마트폰 HDR 사진(역광 창가) | 필름 없음 ↔ Classic Chrome | 들뜬 암부가 가라앉고 창가 하이라이트가 하얗게 날지 않고 밀도 있게 남음, 창틀 경계에 미세한 번짐 | 사용자 확인 필요 (실제 스마트폰 HDR 사진 없음). 데모 사진에서 필름 없음 ↔ 클래식 크롬 전환·렌더 오류 0 확인 |
+| 2 | 같은 사진 | 100% 확대 | 1px 흰 테두리(디지털 샤프닝)가 줄고 질감은 유지 | 사용자 확인 필요 (육안 판정). ES 수식·게이팅은 U8 골든으로 고정. 이 과정에서 선명도/ES 경로의 기존 회색 점 버그를 찾아 고침(위 메모) |
+| 3 | RAW 또는 Log 영상(하늘 포함) | DR100 → DR400 | 하늘 디테일이 살아나고 백점은 유지 | 사용자 확인 필요 (RAW·Log 소스 없음). 숄더·롤오프는 U4 골든(Ui 이상 = 2.04 백점)으로 고정 |
+| 4 | 아무 사진 | Classic Neg → Nostalgic Neg → Velvia | 매번 그 필름 프리셋 값으로 교체, 이전 그레인·비네팅이 남지 않음 | **확인**(데모): 대비/그레인/크기/비네팅/명료도/색온도/D레인지 = 16/22/30/−10/8/−2/DR200 → 2/18/30/−8/4/6/DR400 → 18/0/0/−6/6/2/DR100 |
+| 5 | 같은 사진 | 필름 선택 후 각 탭 열기 | 슬라이더에 프리셋 값과 눈금 표시, 더블탭 시 프리셋 값 복귀 | **확인**: 클래식 크롬 라이트 탭 눈금 5개(라이트 밸런스·대비·하이라이트·쉐도우·검정), 필름 없음 눈금 0개, 벨비아 카드 재탭 → 프리셋 복귀 + 토스트. 더블탭 복귀는 U12-5 리듀서 골든 |
+| 6 | 새 파일 열기 | 필름이 선택된 상태에서 새 파일 | 필름 없음 + 전 슬라이더 0(필름 강도·확산 강도 100) | **확인**: 벨비아 선택 후 파일 열기 → 필름 없음, 모든 슬라이더 0, 확산 강도 100, DR100, HDF 끔 |
+| 7 | 필름 없음 | 업그레이드 전 스크린샷과 비교 | 동일 | **확인**: /lab/renderer 원본, 스튜디오 데모 필름 없음(HDF 끔) 모두 업그레이드 전 빌드와 픽셀 최대 차 0 |
+| 8 | 필름 강도 0% | Classic Chrome | LUT·ISP 효과 사라짐, 프리셋 슬라이더 효과만 남음 | 부분 확인: ispUniforms(강도 0) → ISP 전부 0 (U9), LUT 혼합은 기존 §16.4. 화면 육안 비교는 사용자 확인 필요 |
+| 9 | 4K 영상 프리뷰 | Positive Film 재생 | 프레임 드롭이 업그레이드 전보다 심하지 않음 | 사용자 확인 필요 (실기 GPU 필요, SwiftShader 수치는 의미 없음). MH 패스 추가량: 반 해상도 추출 1 + down2 (ℓ−1) + gauss 2 = 프레임당 3~4 패스(1080p 프리뷰 ℓ = 1) |
+| 10 | 사진 저장(원본 화질) | Classic Chrome + 줌 오버레이 | 프리뷰·오버레이·저장 결과의 톤 일치, 타일 이음매 없음 | 부분 확인: /lab/renderer 타일 이음새 검증 PASS(원본·클래식 크롬 0/255, 벨비아 1/255 ≤ 허용 1/255), GPU↔CPU 프로브 PASS(≤ 0.134/255). 실기 저장·오버레이 육안 비교는 사용자 확인 필요 |
