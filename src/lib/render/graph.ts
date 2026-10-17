@@ -1,6 +1,6 @@
 // 섹션 7 렌더 그래프 — 패스 순서와 생략 규칙(실효 파라미터 기준), 미리보기·타일 공통.
 import { computeAtmosphere, type Vec3 } from "./dehaze-atm";
-import { buildProgram, createLut3D, createTex2D, readFloatRGBA, renderErrors, TargetPool, type Program, type RendererCaps, type Sized, type Target } from "./gl";
+import { buildProgram, createLut3D, createTex2D, readFloatRGBA, renderErrors, restoreDefaultFramebuffer, TargetPool, type Program, type RendererCaps, type Sized, type Target } from "./gl";
 import type { PassName } from "./glsl";
 import { srgbToP3Uniform, type OutputSpace } from "./output-space";
 import type { IspUniforms } from "./isp";
@@ -414,9 +414,14 @@ export class RenderGraph {
     const A = fixedLongSize(c.R, 256);
     const t = this.pool.acquire(A.width, A.height, "rgba16f");
     const c1: ChainParams = { ...c, R: A, s: { ...c.s, uExpGain: 1 } };
-    this.normalize(c1, A, srcTex, srcSize, orient, t);
-    const px = readFloatRGBA(this.gl, t);
-    this.pool.release(t);
+    let px: Float32Array;
+    try {
+      this.normalize(c1, A, srcTex, srcSize, orient, t);
+      px = readFloatRGBA(this.gl, t);
+    } finally {
+      restoreDefaultFramebuffer(this.gl);
+      this.pool.release(t);
+    }
     const Y = new Float32Array(A.width * A.height);
     for (let i = 0; i < Y.length; i++) Y[i] = 0.2126 * px[i * 4]! + 0.7152 * px[i * 4 + 1]! + 0.0722 * px[i * 4 + 2]!;
     return Y;
@@ -427,9 +432,14 @@ export class RenderGraph {
     const A = fixedLongSize(c.R, long);
     const t = this.pool.acquire(A.width, A.height, "rgba16f");
     const c1: ChainParams = { ...c, R: A, s: { ...c.s, uExpGain: 1 }, norm: { ...c.norm, wb: identityWb } };
-    this.normalize(c1, A, srcTex, srcSize, orient, t);
-    const px = readFloatRGBA(this.gl, t);
-    this.pool.release(t);
+    let px: Float32Array;
+    try {
+      this.normalize(c1, A, srcTex, srcSize, orient, t);
+      px = readFloatRGBA(this.gl, t);
+    } finally {
+      restoreDefaultFramebuffer(this.gl);
+      this.pool.release(t);
+    }
     return { width: A.width, height: A.height, data: px };
   }
 

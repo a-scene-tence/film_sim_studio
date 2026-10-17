@@ -255,20 +255,27 @@ export function halfToFloat(h: number): number {
   return s * 2 ** (e - 15) * (1 + f / 1024);
 }
 
-/** float 렌더 타깃(RGBA16F) 판독. FLOAT 판독이 막힌 기기는 HALF_FLOAT 로 읽어 변환한다 */
+/** float 렌더 타깃(RGBA16F) 판독. FLOAT 판독이 막힌 기기는 HALF_FLOAT 로 읽어 변환한다. 판독 후 FBO 바인딩은 반드시 기본 프레임버퍼(null)·캔버스 뷰포트로 복구한다 */
 export function readFloatRGBA(gl: WebGL2RenderingContext, t: Target, x = 0, y = 0, w = t.width, h = t.height): Float32Array {
-  gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
-  const type = gl.getParameter(gl.IMPLEMENTATION_COLOR_READ_TYPE) as number;
-  const fmt = gl.getParameter(gl.IMPLEMENTATION_COLOR_READ_FORMAT) as number;
-  let out: Float32Array;
-  if (type === gl.HALF_FLOAT && fmt === gl.RGBA) {
-    const u = new Uint16Array(w * h * 4);
-    gl.readPixels(x, y, w, h, gl.RGBA, gl.HALF_FLOAT, u);
-    out = Float32Array.from(u, halfToFloat);
-  } else {
-    out = new Float32Array(w * h * 4);
+  try {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+    const type = gl.getParameter(gl.IMPLEMENTATION_COLOR_READ_TYPE) as number;
+    const fmt = gl.getParameter(gl.IMPLEMENTATION_COLOR_READ_FORMAT) as number;
+    if (type === gl.HALF_FLOAT && fmt === gl.RGBA) {
+      const u = new Uint16Array(w * h * 4);
+      gl.readPixels(x, y, w, h, gl.RGBA, gl.HALF_FLOAT, u);
+      return Float32Array.from(u, halfToFloat);
+    }
+    const out = new Float32Array(w * h * 4);
     gl.readPixels(x, y, w, h, gl.RGBA, gl.FLOAT, out);
+    return out;
+  } finally {
+    restoreDefaultFramebuffer(gl);
   }
+}
+
+/** 오프스크린 패스 이후 상태 복구: 기본 프레임버퍼 + 캔버스 전체 뷰포트 */
+export function restoreDefaultFramebuffer(gl: WebGL2RenderingContext): void {
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  return out;
+  gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
 }

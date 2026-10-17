@@ -12,7 +12,7 @@ import { DOMAIN_INDEX, listStoreLuts, loadBuiltinLut, loadManifest, loadStoreLut
 import { DEFAULT_PARAMS, effectiveParams, scalarUniforms, toneOpsOn, type Effective, type RenderParams } from "./params";
 import { ispUniforms, type IspUniforms } from "./isp";
 import { grainCoarse, grainOffset, grainScaleFull, grainScalePreview, hdfPlan, mhPlan, scaledSize, tilePadding, graphSizes, type Size } from "./plan";
-import { pixelPipelineFromWs, type LutStageRef, type NormalizeCtx, type PixelCtx } from "./reference";
+import { normalizePixel, pixelPipelineFromWs, type LutStageRef, type NormalizeCtx, type PixelCtx } from "./reference";
 import { toneInvTable, TONE_INV_N } from "./tone-inv-table";
 import { probeVideoOrientation, type OrientationProbeResult } from "./video-orientation-probe";
 import { VideoSource, type VideoStats } from "./video-source";
@@ -671,6 +671,42 @@ export class FilmRenderer {
     const R = this.renderSize();
     const c = this.chainParams(R);
     return this.graph.analysisRgb(c, c.src.tex, c.src.size, c.src.orient, long, colMajor(IDENTITY3));
+  }
+
+  /**
+   * WB 스포이트 표본: (u,v) ∈ [0,1]² (표시 방향) 주변 (2r+1)² 창의 WB 적용 전·노출 이득 1 WS 선형 RGB 평균.
+   * 사진은 메모리에 있는 CPU 프록시(표시 방향 Float32)를 reference.ts 의 normalizePixel 로 정규화해 GL 상태를 건드리지 않는다.
+   * 비디오(프레임이 GPU 텍스처에만 있음)만 readAnalysisRgb 로 폴백한다. 범위 밖 좌표·표본 없음 → null
+   */
+  sampleWsPatch(u: number, v: number, r = 2): [number, number, number] | null {
+    const a = this.asset;
+    if (!a || !Number.isFinite(u) || !Number.isFinite(v) || u < 0 || u > 1 || v < 0 || v > 1) return null;
+    let n = 0, sr = 0, sg = 0, sb = 0;
+    const add = (R: number, G: number, B: number) => {
+      if (Number.isFinite(R) && Number.isFinite(G) && Number.isFinite(B)) { sr += R; sg += G; sb += B; n++; }
+    };
+    if (a.kind === "video") {
+      const g = this.readAnalysisRgb(1024);
+      const x = Math.min(g.width - 1, Math.floor(u * g.width)), y = Math.min(g.height - 1, Math.floor(v * g.height));
+      for (let j = Math.max(0, y - r); j <= Math.min(g.height - 1, y + r); j++) {
+        for (let i = Math.max(0, x - r); i <= Math.min(g.width - 1, x + r); i++) {
+          const o = (j * g.width + i) * 4;
+          add(g.data[o]!, g.data[o + 1]!, g.data[o + 2]!);
+        }
+      }
+    } else {
+      const p = a.proxy;
+      const ctx: NormalizeCtx = { ...this.normalizeUniforms(a.descriptor).ctx, wb: IDENTITY3, expGain: 1 };
+      const x = Math.min(p.width - 1, Math.floor(u * p.width)), y = Math.min(p.height - 1, Math.floor(v * p.height));
+      for (let j = Math.max(0, y - r); j <= Math.min(p.height - 1, y + r); j++) {
+        for (let i = Math.max(0, x - r); i <= Math.min(p.width - 1, x + r); i++) {
+          const o = (j * p.width + i) * 4;
+          const w = normalizePixel([p.data[o]!, p.data[o + 1]!, p.data[o + 2]!], ctx);
+          add(w[0], w[1], w[2]);
+        }
+      }
+    }
+    return n === 0 ? null : [sr / n, sg / n, sb / n];
   }
 
   private renderNowInner(wantHist: boolean): { stats: RenderStats; hist: HistPixels | null } {
