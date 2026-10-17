@@ -117,8 +117,8 @@ export function monoTintUniform(mono: boolean, hueDeg: number, amount: number): 
   return [C * Math.cos(h), C * Math.sin(h)];
 }
 
-export const KE_LEVELS = [0, 0.1, 0.2] as const;
-export const KB_LEVELS = [0, 0.12, 0.24] as const;
+export const KE_LEVELS = [0, 0.5, 1] as const;
+export const KB_LEVELS = [0, 0.5, 1] as const;
 
 /** 셰이더 전달용 스칼라 (섹션 9.3) */
 export interface ScalarUniforms {

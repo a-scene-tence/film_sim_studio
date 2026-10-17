@@ -41,8 +41,8 @@ vec3 dehazeApply(vec3 x, vec2 uvG) {
   }
   return max(J, 0.0);
 }
-uniform float uKe;           // CCE 0 / 0.10 / 0.20
-uniform float uKb;           // FX Blue 0 / 0.12 / 0.24
+uniform float uKe;           // CCE 강도 0 / 0.5 / 1
+uniform float uKb;           // FX Blue 강도 0 / 0.5 / 1
 uniform bool uMono;
 uniform bool uCurveOn;
 uniform sampler2D uCurve;    // 256x1 R16F
@@ -51,10 +51,18 @@ vec3 cceOp(vec3 v) {
   vec3 lab = linToOklab(srgbDec(v));
   float C = length(lab.yz);
   float h = atan(lab.z, lab.y) / DEG;
-  float blue = exp(-0.5 * sq(wrap180(h - 264.0) / 28.0));
-  float me = sstep(0.08, 0.20, C) * (1.0 - blue) * sstep(0.30, 0.70, lab.x);
-  float mb = sstep(0.05, 0.16, C) * blue * sstep(0.20, 0.60, lab.x);
-  lab.x = pow(max(lab.x, 0.0), 1.0 + uKe * me + uKb * mb);
+  float hd = h < 0.0 ? h + 360.0 : h;
+  vec3 vc = clamp(v, 0.0, 1.0);
+  float mx = max(vc.r, max(vc.g, vc.b));
+  float S = (mx - min(vc.r, min(vc.g, vc.b))) / max(mx, 1e-4);
+  float hueB = sstep(176.0, 190.0, hd) * (1.0 - sstep(270.0, 284.0, hd));
+  float rgbB = sstep(0.0, 0.04, vc.b - 1.15 * vc.r) * sstep(0.0, 0.04, vc.b - 0.85 * vc.g);
+  float blueW = hueB * rgbB;
+  float skin = sstep(25.0, 38.0, hd) * (1.0 - sstep(68.0, 82.0, hd)) * (1.0 - sstep(0.50, 0.65, S)) * sstep(0.35, 0.50, lab.x);
+  float me = sstep(0.18, 0.45, S) * (1.0 - blueW) * (1.0 - 0.5 * skin) * sstep(0.18, 0.25, lab.x) * (1.0 - sstep(0.92, 0.98, lab.x));
+  float mb = blueW * sstep(0.012, 0.045, C) * sstep(0.15, 0.30, lab.x);
+  lab.x *= 1.0 - 0.27 * uKe * me - 0.34 * uKb * mb;
+  lab.yz *= 1.0 + 0.22 * uKe * me + 0.36 * uKb * mb;
   return srgbEnc(gamutMap(lab));
 }
 `;

@@ -410,13 +410,17 @@
 - 기본 OFF. 리코 탭에서 원터치 토글.
 
 ## §10 컬러 크롬 이펙트 / 컬러 크롬 FX 블루 (S9, 컬러 시뮬레이션 전용)
-- y = srgbDec(v) → OKLab → L, C, h
-- blue(h) = exp(−0.5·(wrap180(h − 264)/28)²)
-- CCE 강도 k_e: OFF 0 / 약 0.10 / 강 0.20
-  m_e = smoothstep(0.08, 0.20, C)·(1 − blue(h))·smoothstep(0.30, 0.70, L)
-- FX Blue 강도 k_b: OFF 0 / 약 0.12 / 강 0.24
-  m_b = smoothstep(0.05, 0.16, C)·blue(h)·smoothstep(0.20, 0.60, L)
-- L' = L^(1 + k_e·m_e + k_b·m_b). C 와 h 는 유지해 명도만 비선형 압축한다. 이어서 gamutMap(§6.6), srgbEnc.
+- v = 입력 표시 sRGB(0..1 clamp), y = srgbDec(v) → OKLab → L, C, h(0..360°)
+- S = HSV 채도 = (max(v) − min(v)) / max(max(v), 1e-4)
+- 강도 uKe, uKb: OFF 0 / 약 0.5 / 강 1
+- 블루 대역: hueB = smoothstep(176,190,h)·(1 − smoothstep(270,284,h)),
+  rgbB = smoothstep(0,0.04, B − 1.15R)·smoothstep(0,0.04, B − 0.85G), blueW = hueB·rgbB (무채색·흰 구름은 0)
+- 피부 보호: skin = smoothstep(25,38,h)·(1 − smoothstep(68,82,h))·(1 − smoothstep(0.50,0.65,S))·smoothstep(0.35,0.50,L)  (연한 중저채도 살구·베이지만)
+- CCE: m_e = smoothstep(0.18,0.45,S)·(1 − blueW)·(1 − 0.5·skin)·smoothstep(0.18,0.25,L)·(1 − smoothstep(0.92,0.98,L))
+- FX Blue: m_b = blueW·smoothstep(0.012,0.045,C)·smoothstep(0.15,0.30,L)  (밝고 옅은 하늘색까지 반응, 최소 크로마 가드만 유지)
+- L' = L·(1 − 0.27·uKe·m_e − 0.34·uKb·m_b)  → CCE 약 −13.5% / 강 −27%, FX Blue 약 −17% / 강 −34% (최대치)
+- C' = C·(1 + 0.22·uKe·m_e + 0.36·uKb·m_b)  → CCE 약 +11% / 강 +22%, FX Blue 약 +18% / 강 +36% (최대치). h 유지.
+- 이어서 gamutMap(§6.6), srgbEnc.
 
 ## §11 은염 클럼핑 그레인 (S15, 표시 인코딩 v)
 - 노이즈: 픽셀 격자 위 삼각 PDF 백색 노이즈 + 짧은 커널(§16.13). 저주파 격자 보간 노이즈(구 값 노이즈·simplex)는 구름 얼룩을 만들어 폐기

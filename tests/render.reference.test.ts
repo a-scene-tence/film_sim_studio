@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { bakeCurve, sampleCurve, type CurvePreset, type CurveState } from "../src/lib/render/curve";
 import * as R from "../src/lib/render/reference";
+import { linToOklab, srgbDec } from "../src/lib/color/fse/engine.mjs";
 
 const close = (a: ArrayLike<number>, b: ArrayLike<number>, tol = 1e-5) => {
   expect(a.length).toBe(b.length);
@@ -48,10 +49,35 @@ describe("섹션 15.2-3 CPU 참조", () => {
   });
   it("clipNeg", () => close(R.clipNeg([0.4, -0.05, 0.2]), [0.252146, 0, 0.140081]));
   it("원본 모드 srgbEnc(toneRef(x))", () => close(R.originalEnc([0.18, 1.0, 0.01]), [0.473121, 0.879849, 0.065758]));
-  it("CCE / FX 블루", () => {
-    close(R.cceOp([0.85, 0.25, 0.2], 0.2, 0), [0.782316, 0.178054, 0.138219]);
-    close(R.cceOp([0.2, 0.35, 0.8], 0, 0.24), [0.135154, 0.267748, 0.712104]);
-    close(R.cceOp([0.5, 0.5, 0.5], 0.2, 0.24), [0.5, 0.5, 0.5]);
+  it("CCE / FX 블루: 레벨별 명도 감소 · 채도 증가", () => {
+    const lab = (v: number[]) => { const [L, a, b] = linToOklab(v.map(srgbDec)); return { L, C: Math.hypot(a, b) }; };
+    const red = [0.85, 0.25, 0.2], leaf = [0.3, 0.7, 0.25], sky = [0.62, 0.78, 0.95], denim = [0.2, 0.35, 0.8];
+    const lv = [0, 0.5, 1];
+    // 색 밀도 = C/L (명도를 누르면서 색이 더 진해지는 정도). 색역 경계 픽셀은 절대 C 가 gamutMap 으로 제한되므로 밀도로 단정한다.
+    const dens = (o: { L: number; C: number }) => o.C / o.L;
+    const chk = (px: number[], mk: (k: number) => number[], absC: boolean) => {
+      const o = lv.map((k) => lab(mk(k)));
+      expect(o[1]!.L).toBeLessThan(o[0]!.L - 0.02);
+      expect(o[2]!.L).toBeLessThan(o[1]!.L - 0.02);
+      expect(dens(o[1]!)).toBeGreaterThan(dens(o[0]!) * 1.1);
+      expect(dens(o[2]!)).toBeGreaterThan(dens(o[1]!));
+      expect(dens(o[2]!)).toBeGreaterThan(dens(o[0]!) * 1.2);
+      if (absC) { expect(o[1]!.C).toBeGreaterThan(o[0]!.C); expect(o[2]!.C).toBeGreaterThan(o[1]!.C); }
+      close(R.cceOp(px, 0, 0), px, 1e-5);
+    };
+    const pink = [0.75, 0.4, 0.45];
+    for (const px of [red, leaf]) chk(px, (k) => R.cceOp(px, k, 0), false);
+    chk(pink, (k) => R.cceOp(pink, k, 0), true);
+    for (const px of [sky, denim]) chk(px, (k) => R.cceOp(px, 0, k), true);
+    // 강 레벨 명도 압축 범위: CCE 24~30%, FX Blue 30~38% (최대 마스크 픽셀)
+    expect(1 - lab(R.cceOp(red, 1, 0)).L / lab(red).L).toBeGreaterThan(0.2);
+    expect(1 - lab(R.cceOp(denim, 0, 1)).L / lab(denim).L).toBeGreaterThan(0.28);
+    close(R.cceOp([0.5, 0.5, 0.5], 1, 1), [0.5, 0.5, 0.5]);
+    close(R.cceOp([0.9, 0.92, 0.95], 0, 1), [0.9, 0.92, 0.95], 2e-2); // 흰 구름 거의 불변
+    // 피부톤(연한 살구)은 같은 레벨에서 고채도 주황보다 덜 눌린다
+    const skinPx = [0.85, 0.65, 0.55], orange = [0.95, 0.5, 0.05];
+    const drop = (px: number[]) => 1 - lab(R.cceOp(px, 1, 0)).L / lab(px).L;
+    expect(drop(skinPx)).toBeLessThan(drop(orange));
   });
   it("톤 커브 256칸 + 선형 보간", () => {
     const xs = [0.1, 0.3, 0.6, 0.9];
