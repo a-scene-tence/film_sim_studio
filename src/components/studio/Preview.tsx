@@ -6,6 +6,8 @@ import type { FilmRenderer } from "@/lib/render/renderer";
 import { containSize, doubleTapZoom, isDoubleTap, LONG_PRESS_MS, LONG_PRESS_SLOP, pan, pinch, pointToImageUV, type Geometry, type PinchStart, type Vec2, type ZoomState } from "@/lib/studio/gestures";
 import { DetailOverlay } from "./DetailOverlay";
 import { HdfToggle } from "./HdfToggle";
+import { IconClose, IconFullscreen } from "./icons";
+import { useFullscreenPreview } from "./useFullscreenPreview";
 import { Histogram } from "./Histogram";
 import { VideoBar } from "./VideoBar";
 
@@ -43,6 +45,7 @@ export interface PreviewProps {
 export function Preview(props: PreviewProps) {
   const { canvasRef, renderer, asset, hdf, onToggleHdf, compare, onCompare, editKey, disabled, pauseVideoSignal, picking = false, onPick, pickMarker = null, children } = props;
   const box = useRef<HTMLDivElement>(null);
+  const fs = useFullscreenPreview(box);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [zoom, setZoom] = useState<ZoomState>(ONE);
   const [zoomLabel, setZoomLabel] = useState<string | null>(null);
@@ -155,6 +158,7 @@ export function Preview(props: PreviewProps) {
       endCompare();
       if (geometry && s && !s.moved && !wasCompare) {
         const cur = { time: e.timeStamp, x: s.x, y: s.y };
+        if (fs.active && !pointToImageUV({ x: s.x, y: s.y }, zoomRef.current, geometry)) { lastTap.current = null; single.current = null; fs.close(); return; }
         if (isDoubleTap(lastTap.current, cur)) { lastTap.current = null; commit(doubleTapZoom(zoomRef.current, { x: s.x, y: s.y }, geometry)); }
         else lastTap.current = cur;
       }
@@ -174,7 +178,8 @@ export function Preview(props: PreviewProps) {
 
   return (
     <div
-      ref={box} className="relative min-h-[40dvh] flex-1 overflow-hidden bg-black" style={{ touchAction: "none", cursor: picking ? "crosshair" : undefined }}
+      ref={box} className={fs.active ? "fixed inset-0 z-[60] overflow-hidden bg-black" : "relative min-h-[40dvh] flex-1 overflow-hidden bg-black"}
+      style={{ touchAction: "none", cursor: picking ? "crosshair" : undefined, ...(fs.active ? { height: "100dvh" } : null) }}
       onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
     >
       <div className="absolute inset-0" style={{ transform: `translate(${zoom.t.x}px, ${zoom.t.y}px) scale(${zoom.z})`, transformOrigin: "50% 50%", willChange: "transform" }}>
@@ -190,13 +195,31 @@ export function Preview(props: PreviewProps) {
         ) : null}
       </div>
       {asset && renderer && geometry ? <DetailOverlay renderer={renderer} asset={asset} zoom={zoom} geometry={geometry} editKey={editKey} /> : null}
-      {asset ? <Histogram renderer={renderer} tick={editKey} playing={playing} active={!disabled} key={assetId ?? "none"} /> : null}
-      <HdfToggle on={hdf} onToggle={onToggleHdf} disabled={!asset} />
-      {picking ? <div role="status" className="pointer-events-none absolute left-1/2 top-2 z-20 w-[calc(100%-24px)] max-w-[420px] -translate-x-1/2 rounded-[12px] px-3 py-2 text-center text-[12px] leading-snug text-white" style={{ background: "rgba(0,0,0,0.75)", border: "1px solid var(--accent)" }}>사진에서 기준이 될 흰색 또는 회색 영역을 터치하세요 (취소: 스포이트 다시 누르기)</div> : null}
+      {asset && !fs.active ? <Histogram renderer={renderer} tick={editKey} playing={playing} active={!disabled} key={assetId ?? "none"} /> : null}
+      {!fs.active ? <HdfToggle on={hdf} onToggle={onToggleHdf} disabled={!asset} /> : null}
+      {!fs.active ? (
+        <button
+          type="button" aria-label="전체화면 보기" disabled={!asset || disabled || picking}
+          className={`absolute right-[72px] top-0 z-10 flex h-[48px] w-[48px] items-center justify-center text-white ${!asset || disabled || picking ? "opacity-40" : ""}`}
+          onClick={fs.open}
+        >
+          <span className="flex h-8 w-8 items-center justify-center rounded-full" style={{ background: "#2a2a2e" }}><IconFullscreen size={18} /></span>
+        </button>
+      ) : (
+        <button
+          type="button" aria-label="전체화면 닫기"
+          className="absolute z-[70] flex h-[48px] w-[48px] items-center justify-center text-white"
+          style={{ top: "max(8px, env(safe-area-inset-top))", right: "max(8px, env(safe-area-inset-right))" }}
+          onClick={fs.close}
+        >
+          <span className="flex h-10 w-10 items-center justify-center rounded-full" style={{ background: "rgba(0,0,0,0.65)", border: "1px solid rgba(255,255,255,0.6)" }}><IconClose size={22} /></span>
+        </button>
+      )}
+      {picking && !fs.active ? <div role="status" className="pointer-events-none absolute left-1/2 top-2 z-20 w-[calc(100%-24px)] max-w-[420px] -translate-x-1/2 rounded-[12px] px-3 py-2 text-center text-[12px] leading-snug text-white" style={{ background: "rgba(0,0,0,0.75)", border: "1px solid var(--accent)" }}>사진에서 기준이 될 흰색 또는 회색 영역을 터치하세요 (취소: 스포이트 다시 누르기)</div> : null}
       {compare ? <div className="pointer-events-none absolute left-1/2 top-2 z-10 -translate-x-1/2 rounded-full px-3 py-1 text-[12px] text-white" style={{ background: "rgba(0,0,0,0.6)" }}>원본</div> : null}
       {zoomLabel ? <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full px-3 py-1 text-[12px] text-white" style={{ background: "rgba(0,0,0,0.6)", bottom: isVideo ? 60 : 12 }}>{zoomLabel}</div> : null}
       {isVideo && renderer && asset?.video ? <VideoBar renderer={renderer} fps={asset.video.fps} onPlayingChange={setPlaying} pauseSignal={pauseVideoSignal} /> : null}
-      {children}
+      {fs.active ? null : children}
     </div>
   );
 }
