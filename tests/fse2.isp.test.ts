@@ -204,3 +204,11 @@ describe("U14 회귀: 필름 없음 → ISP 분기 전부 꺼짐", () => {
     expect(edgeSoftenL(0.5, 0.06, 0)).toBe(0.5);
   });
 });
+
+describe("gamutMap tanh 오버플로 가드 (GPU NaN → 회색 점 방지)", () => {
+  it("common.glsl gamutMap: tanh 인자를 15 로 묶는다 (float32 에서 tanh(15) = 1 이라 결과 동일)", async () => {
+    const { COMMON_GLSL } = await import("@/lib/render/glsl/common");
+    expect(COMMON_GLSL).toContain("tanh(min((C - t) / r, 15.0))");
+    expect(Math.fround(Math.tanh(15))).toBe(1);
+  });
+});
