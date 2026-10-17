@@ -63,9 +63,9 @@ describe("T8 SLIDERS 표 · normalizeValue · buildUniforms", () => {
     expect(u.uLb).toBeCloseTo(0.2, 12);
     expect(u.uCt).toBeCloseTo(-0.35, 12);
     close(u.uMonoTint, [0.010261, 0.028191], 1e-6);
-    // mono 필름이면 CCE/FX Blue 는 0 (Step 3 규칙) — mono 가 아니면 강 1 / 약 0.5
+    // mono 필름이면 CCE/FX Blue 는 0 (Step 3 규칙) — mono 가 아니면 OPT-v1 농도 계수 (CCE 강 0.145 / FX Blue 약 0.065)
     const c = buildUniforms({ ...st, simId: "fuji-provia" }, false);
-    expect([c.uKe, c.uKb]).toEqual([1, 0.5]);
+    expect([c.uKe, c.uKb]).toEqual([0.145, 0.065]);
     expect(c.uMonoTint).toEqual([0, 0]);
     expect([u.uKe, u.uKb]).toEqual([0, 0]);
   });

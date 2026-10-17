@@ -117,8 +117,9 @@ export function monoTintUniform(mono: boolean, hueDeg: number, amount: number): 
   return [C * Math.cos(h), C * Math.sin(h)];
 }
 
-export const KE_LEVELS = [0, 0.5, 1] as const;
-export const KB_LEVELS = [0, 0.5, 1] as const;
+/** OPT-v1 (COLOR_SCIENCE §10): CCE 최대 명도 농도 7.5% / 14.5%, FX Blue CPL 최대 명도 농도 6.5% / 13% */
+export const KE_LEVELS = [0, 0.075, 0.145] as const;
+export const KB_LEVELS = [0, 0.065, 0.13] as const;
 
 /** 셰이더 전달용 스칼라 (섹션 9.3) */
 export interface ScalarUniforms {

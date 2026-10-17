@@ -337,7 +337,7 @@
 - t = 가이드 필터(t̃, r=16, ε=0.001) 후 풀해상도 업샘플
 - D > 0: k = D/100, t_e = mix(1, max(t, 0.1), k), J = (x − A)/t_e + A
 - D < 0: k = −D/100, J = mix(x, A, 0.4·k)
-- x' = max(J, 0)
+- x' = max(J, 0) (D ≤ 0). D > 0 (OPT-v1 소프트 토): x' = 0.004·softplus(J/0.004), softplus(t) = max(t,0) + ln(1 + e^−|t|). 0 에서 하드 클립하지 않아 암부 계조가 뭉개지지 않는다.
 ### §8.4 베이스 레이어 톤 (라이트밸런스 S_lb, 쉐도우 S_sh, 하이라이트 S_hi, 흰색 S_wh, 검정 S_bk, 밝기 S_br)
 - Y = luma709(x), Yl = log2(max(Y, 2^−20))
 - Bs = 가이드 필터(Yl, r = 20 (프록시 1024 기준), ε = 0.25), Dt = Yl − Bs, e = Bs − log2(0.18)
@@ -347,10 +347,15 @@
   m_wh = smoothstep(1.5, 3.8, e)
   m_bk = 1 − smoothstep(−7, −3, e)
   m_mid = exp(−0.5·(e/1.8)²)
-- ΔB = 1.5·S_sh·m_sh + 1.5·S_hi·m_hi + 1.0·S_wh·m_wh + 1.0·S_bk·m_bk + 1.0·S_br·m_mid + 1.2·S_lb·(m_sh − m_hi)
-- Y' = 2^(Bs + ΔB + Dt), x' = x·Y'/max(Y, 2^−20). Y ≤ 2^−20 이면 x' = x.
+- OPT-v1 존 분리 톤 깊이 (사용자 지시 2-2, 설계값):
+  m_sh2 = m_sh·(S_sh > 0 ? smoothstep(−7, −4, e) : 1)·(1 − smoothstep(−3.5, 1.5, e))  (쉐도우 리프트는 Zone 0~I 블랙 코어를 고정, 중간톤 보호)
+  m_hi2 = S_hi < 0 ? smoothstep(−1, 3.5, e) : m_hi  (하이라이트 복원의 부드러운 필름 숄더: 전이 폭 4.5 stop, S_hi = −1 에서도 톤 기울기 ≥ 0.5 라 밝은 영역이 평평한 회색 띠로 눌리지 않는다. x' = x·Y'/Y 이므로 선형 색비 보존)
+  g_D = 1 + 0.25·(max(S_sh, 0)·m_sh2 + max(−S_hi, 0)·m_hi2)  (압축된 존의 국소 대비 복원)
+- ΔB = 1.5·S_sh·m_sh2 + 1.5·S_hi·m_hi2 + 1.0·S_wh·m_wh + 1.0·S_bk·m_bk + 1.0·S_br·m_mid + 1.2·S_lb·(m_sh − m_hi)  (라이트 밸런스는 원래 m_sh 사용)
+- Y' = 2^(Bs + ΔB + Dt·g_D), x' = x·Y'/max(Y, 2^−20). Y ≤ 2^−20 이면 x' = x. (ISP ZS·팝 항은 §19.4, 팝이 적용된 Dt 에 g_D 를 곱한다)
 ### §8.5 대비 (S_ct)
-- e = log2(max(Y, 2^−20)) − log2(0.18), Y' = 0.18·2^(e·(1 + 0.5·S_ct)), x' = x·Y'/max(Y, 2^−20)
+- e = log2(max(Y, 2^−20)) − log2(0.18), Y' = 0.18·2^(e + 0.5·S_ct·e·exp(−0.5·(e/2.5)²)), x' = x·Y'/max(Y, 2^−20)
+- OPT-v1 필름 시그모이드: 중회색 기울기는 1 + 0.5·S_ct (구 식과 같음), |e| 가 커지면 보정량이 0 으로 감겨 토·숄더가 원래 값으로 돌아온다(끝단 클리핑 없음). S_ct ∈ [−1, 1] 에서 단조.
 ### §8.6 음수 제거 (S7)
 - Y = luma709(x), n = min(x_r, x_g, x_b)
 - n < 0 일 때: Y ≤ 0 이면 x = 0, 그 외 t = Y/(Y − n), x = Y + t·(x − Y)
@@ -376,14 +381,18 @@
 - skin(h) = exp(−0.5·(wrap180(h − 55)/20)²)
 - V ≥ 0: g = 1 + (V/100)·(1 − smoothstep(0, 0.20, C))·(1 − 0.5·skin(h))
 - V < 0: g = 1 + (V/100)·(1 − 0.5·smoothstep(0, 0.20, C))
-- C2 = C1·g, 이어서 gamutMap(§6.6)
+- C2 = C1·g
+- OPT-v1 Helmholtz–Kohlrausch 광학 농도: C2 > C 이면 L' = L·(1 − 0.06·(1 − C/C2)·smoothstep(0, 0.15, C2)) (늘어난 크로마 비율에 비례, 최대 −6%, 무채색은 불변)
+- 이어서 gamutMap(§6.6)
 ### §8.9 명료도 Cl (OKLab L)
 - base = 가이드 필터(L, r=30 (프록시 1024 기준), ε=0.004)
-- L' = L + 1.2·(Cl/100)·(L − base)·4·L·(1 − L)
+- OPT-v1 할로 억제: d = L − base, L' = L + 1.2·(Cl/100)·0.08·tanh(d/0.08)·4·L·(1 − L)·smoothstep(0.02, 0.16, L)·(1 − 0.5·smoothstep(0.85, 1, L))
+  (작은 결은 선형, 큰 경계 델타는 tanh 로 완충, 암부·극명부 감쇠. GPU 는 tanh 인자를 ±15 로 묶는다)
 ### §8.10 선명도 Sh ∈ [0,150] (언샵 마스크, OKLab L, 풀해상도)
 - blur = 분리형 가우시안 σ = 1.0px, 커널 반경 3
 - Dd = L − blur, Dd' = sign(Dd)·max(|Dd| − 0.004, 0)
-- L' = L + (Sh/100)·1.2·Dd'  (FSE-v2: − uIspEs·sstep(0.012, 0.045, |Dd|)·Dd 항이 붙는다, §19 5-5)
+- OPT-v1 할로 억제: κ = Dd' > 0 ? 0.035 : 0.05 (흰 오버슈트 쪽 상한을 낮춘다), w_T = smoothstep(0.02, 0.15, L)·(1 − 0.6·smoothstep(0.85, 1, L))
+- L' = L + (Sh/100)·1.2·w_T·κ·tanh(Dd'/κ)  (FSE-v2: − uIspEs·sstep(0.012, 0.045, |Dd|)·Dd 항이 붙는다, §19 5-5)
 ### §8.11 광학 비네팅 cos⁴θ (Vg ∈ [−100,100], 장면 선형, S5)
 - α = W/H, p = (uv − 0.5)·(α, 1), r = |p|/|(α, 1)·0.5| (모서리 = 1)
 - k = |Vg|/100, tanθ = r·k
@@ -409,18 +418,22 @@
 - out = x − (0.30 + 0.18)·s + 0.30·core + 0.18·halo (에너지 보존 재분배, 무채색 산란)
 - 기본 OFF. 리코 탭에서 원터치 토글.
 
-## §10 컬러 크롬 이펙트 / 컬러 크롬 FX 블루 (S9, 컬러 시뮬레이션 전용)
-- v = 입력 표시 sRGB(0..1 clamp), y = srgbDec(v) → OKLab → L, C, h(0..360°)
-- S = HSV 채도 = (max(v) − min(v)) / max(max(v), 1e-4)
-- 강도 uKe, uKb: OFF 0 / 약 0.5 / 강 1
-- 블루 대역: hueB = smoothstep(176,190,h)·(1 − smoothstep(270,284,h)),
-  rgbB = smoothstep(0,0.04, B − 1.15R)·smoothstep(0,0.04, B − 0.85G), blueW = hueB·rgbB (무채색·흰 구름은 0)
-- 피부 보호: skin = smoothstep(25,38,h)·(1 − smoothstep(68,82,h))·(1 − smoothstep(0.50,0.65,S))·smoothstep(0.35,0.50,L)  (연한 중저채도 살구·베이지만)
-- CCE: m_e = smoothstep(0.18,0.45,S)·(1 − blueW)·(1 − 0.5·skin)·smoothstep(0.18,0.25,L)·(1 − smoothstep(0.92,0.98,L))
-- FX Blue: m_b = blueW·smoothstep(0.012,0.045,C)·smoothstep(0.15,0.30,L)  (밝고 옅은 하늘색까지 반응, 최소 크로마 가드만 유지)
-- L' = L·(1 − 0.27·uKe·m_e − 0.34·uKb·m_b)  → CCE 약 −13.5% / 강 −27%, FX Blue 약 −17% / 강 −34% (최대치)
-- C' = C·(1 + 0.22·uKe·m_e + 0.36·uKb·m_b)  → CCE 약 +11% / 강 +22%, FX Blue 약 +18% / 강 +36% (최대치). h 유지.
-- 이어서 gamutMap(§6.6), srgbEnc.
+## §10 컬러 크롬 이펙트 / 컬러 크롬 FX 블루 (S8, 컬러 시뮬레이션 전용) — OPT-v1 광학 농도 재설계
+- 구판(L·(1 − 0.27·uKe·m_e − 0.34·uKb·m_b), C·(1 + 0.22·uKe·m_e + 0.36·uKb·m_b), 좁은 HSV 마스크)은 명도 −27~−34% 와 크로마 +22~+36% 가 겹쳐 하늘·피사체 계조가 수채 얼룩처럼 뭉개져 폐기했다 (사용자 지시, 설계값).
+- 입력: v = 표시 sRGB, y = srgbDec(clamp(v, 0, 1)) (표시 선형), (L, a, b) = OKLab(y), C = |ab|, h = atan2(b, a) (0..360°), Y = luma709(y)
+- 선형 채도: mx = max(y), mn = min(y), sat = (mx − mn)/(mx + 0.05)
+- 농도 계수 (uniform 에 직접 싣는다): uKe = 끔 0 / 약 0.075 / 강 0.145, uKb = 끔 0 / 약 0.065 / 강 0.13
+- 휘도 마스크: wTop = 1 − 0.30·smoothstep(0.85, 1.05, Y), wLum = smoothstep(0.06, 0.30, Y)·wTop
+- 블루 색상 가중: dh = h − 240, wHueB = |dh| < 60 ? 0.5·(1 + cos(π·dh/60)) : 0 (180°~300°, 경계 미분 0)
+- 피부 보호: wSkin = exp(−0.5·(wrap180(h − 55)/20)²)·(1 − smoothstep(0.55, 0.85, sat)) (고채도 주황·적색은 보호하지 않는다)
+- CCE 농도: w_e = uKe·smoothstep(0.25, 0.85, sat)·wLum·(1 − 0.7·wSkin)
+- CCE 순도 (Beer-Lambert): w_e > 0 이고 C > 1e−6 이면 (L_B, a_B, b_B) = OKLab(pow(max(y, 1e−5), 1 + w_e)), ρ = (|a_B b_B|·L)/(max(L_B, 1e−6)·C) − 1, κ = 0.4·uKe, p_e = 1 + κ·tanh(ρ/κ) (약 +3%, 강 +5.8% 상한). 그 외 p_e = 1.
+- FX Blue (CPL) 마스크: m_b = wHueB·smoothstep(0.14, 0.72, sat)·smoothstep(0.02, 0.15, Y)·wTop (무채색 구름 sat < 0.14 는 0)
+- 투과율: f_L = (1 − w_e)·(1 − uKb·m_b) (겹친 흡수층은 곱한다)
+- L' = L·f_L → CCE 최대 −7.5% / −14.5%, FX Blue 최대 −6.5% / −13%
+- (a', b') = (a, b)·f_L·p_e·(1 + (uKb/1.3)·m_b) → 순도 C/L 는 CCE 최대 +3% / +5.8%, FX Blue 최대 +5% / +10%. 절대 크로마는 거의 늘지 않는다(형광·얼룩 방지). h 유지.
+- 이어서 gamutMap(§6.6), srgbEnc. GPU 는 tanh 인자를 ±15 로 묶는다.
+- 검증(tests/render.reference.test.ts): 레벨별 단조 감소, 상한, 무채색·흰 구름 불변, 피부 보호, 6개 그라데이션 경로에서 걸음 당 명도 편차 < 0.006 이고 걸음 1/4 축소 시 편차도 비례 축소(불연속 없음), 명도 램프 단조.
 
 ## §11 은염 클럼핑 그레인 (S15, 표시 인코딩 v)
 - 노이즈: 픽셀 격자 위 삼각 PDF 백색 노이즈 + 짧은 커널(§16.13). 저주파 격자 보간 노이즈(구 값 노이즈·simplex)는 구름 얼룩을 만들어 폐기

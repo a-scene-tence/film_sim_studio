@@ -1,4 +1,4 @@
-// docs/RENDERER.md 섹션 6 fs_final.glsl 정본. Step 5 에서 화면 출력 색공간 변환(uOutConv, 기본 false = 정본과 동일), FSE-v2 §5-7-8 광학 윤곽 완화(uIspEs)만 추가했다.
+// docs/RENDERER.md 섹션 6 fs_final.glsl 정본. Step 5 에서 화면 출력 색공간 변환(uOutConv, 기본 false = 정본과 동일), FSE-v2 §5-7-8 광학 윤곽 완화(uIspEs), OPT-v1 선명도 할로 억제(COLOR_SCIENCE §8.10)만 추가했다.
 import { GRAIN_CLUSTER_MIX, GRAIN_CLUSTER_STD, GRAIN_FINE_STD, GRAIN_FLOOR, GRAIN_GAIN, GRAIN_TRI_NORM, GRAIN_W_CENTER, GRAIN_W_NEIGHBOR } from "../grain";
 const f = (x: number) => (Number.isInteger(x) ? x.toFixed(1) : String(x));
 export const FS_FINAL_GLSL = `// ===== fs_final : S12 sharpen + optical edge softening, S13 grain, S14 dither, output =====
@@ -48,7 +48,9 @@ void main() {
     float D = t.a - texelFetch(uBlurL, p, 0).r;
     float Dp = sign(D) * max(abs(D) - 0.004, 0.0);
     vec3 lab = linToOklab(srgbDec(v));
-    lab.x = t.a + (uSharpen / 100.0) * 1.2 * Dp - uIspEs * sstep(0.012, 0.045, abs(D)) * D;
+    float k = Dp > 0.0 ? 0.035 : 0.05;
+    float wT = sstep(0.02, 0.15, t.a) * (1.0 - 0.6 * sstep(0.85, 1.0, t.a));
+    lab.x = t.a + (uSharpen / 100.0) * 1.2 * wT * k * tanh(clamp(Dp / k, -15.0, 15.0)) - uIspEs * sstep(0.012, 0.045, abs(D)) * D;
     v = srgbEnc(gamutMap(lab));
   }
   vec2 px = uImgPxOrigin + vec2(o) + 0.5;

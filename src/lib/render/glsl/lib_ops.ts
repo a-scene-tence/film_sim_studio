@@ -1,4 +1,4 @@
-// docs/RENDERER.md 섹션 6 lib_ops.glsl — 정본. Step 4 §5-2 패치(uHdfK), FSE-v2 §5-7-1 패치(mhComposite)만 허용.
+// docs/RENDERER.md 섹션 6 lib_ops.glsl — 정본. Step 4 §5-2 패치(uHdfK), FSE-v2 §5-7-1 패치(mhComposite), OPT-v1 패치(cceOp Beer-Lambert·CPL, 디헤이즈 소프트 토, COLOR_SCIENCE §8.3·§10)만 허용.
 export const LIB_OPS_GLSL = `// ===== lib_ops.glsl : shared per-pixel operators =====
 uniform vec2 uDstSize;     // render target size (px)
 uniform vec2 uTileOrigin;  // display-px origin of this target inside the full image (preview: 0,0)
@@ -24,6 +24,8 @@ vec3 mhComposite(vec3 x, vec2 uvL) {
   if (uIspMh <= 0.0) return x;
   return x + uIspMh * (uIspMhTint * texture(uMH, uvL).rgb - 0.25 * emitMh(x));
 }
+float softplus(float t) { return max(t, 0.0) + log(1.0 + exp(-abs(t))); }
+float softToe(float j) { return 0.004 * softplus(j / 0.004); }
 uniform float uDehaze;     // -100..100
 uniform vec3 uAtm;         // atmospheric light A
 uniform sampler2D uTrans;  // R: transmission t (global uv)
@@ -35,34 +37,45 @@ vec3 dehazeApply(vec3 x, vec2 uvG) {
     float t = texture(uTrans, uvG).r;
     float te = mix(1.0, max(t, 0.1), k);
     J = (x - uAtm) / te + uAtm;
+    return vec3(softToe(J.r), softToe(J.g), softToe(J.b));
   } else {
     float k = -uDehaze / 100.0;
     J = mix(x, uAtm, 0.4 * k);
   }
   return max(J, 0.0);
 }
-uniform float uKe;           // CCE 강도 0 / 0.5 / 1
-uniform float uKb;           // FX Blue 강도 0 / 0.5 / 1
+uniform float uKe;           // CCE 농도 계수 0 / 0.075 / 0.145
+uniform float uKb;           // FX Blue CPL 농도 계수 0 / 0.065 / 0.13
 uniform bool uMono;
 uniform bool uCurveOn;
 uniform sampler2D uCurve;    // 256x1 R16F
 float curve1(float v) { return texture(uCurve, vec2((clamp(v, 0.0, 1.0) * 255.0 + 0.5) / 256.0, 0.5)).r; }
 vec3 cceOp(vec3 v) {
-  vec3 lab = linToOklab(srgbDec(v));
+  vec3 y = srgbDec(clamp(v, 0.0, 1.0));
+  vec3 lab = linToOklab(y);
   float C = length(lab.yz);
   float h = atan(lab.z, lab.y) / DEG;
   float hd = h < 0.0 ? h + 360.0 : h;
-  vec3 vc = clamp(v, 0.0, 1.0);
-  float mx = max(vc.r, max(vc.g, vc.b));
-  float S = (mx - min(vc.r, min(vc.g, vc.b))) / max(mx, 1e-4);
-  float hueB = sstep(176.0, 190.0, hd) * (1.0 - sstep(270.0, 284.0, hd));
-  float rgbB = sstep(0.0, 0.04, vc.b - 1.15 * vc.r) * sstep(0.0, 0.04, vc.b - 0.85 * vc.g);
-  float blueW = hueB * rgbB;
-  float skin = sstep(25.0, 38.0, hd) * (1.0 - sstep(68.0, 82.0, hd)) * (1.0 - sstep(0.50, 0.65, S)) * sstep(0.35, 0.50, lab.x);
-  float me = sstep(0.18, 0.45, S) * (1.0 - blueW) * (1.0 - 0.5 * skin) * sstep(0.18, 0.25, lab.x) * (1.0 - sstep(0.92, 0.98, lab.x));
-  float mb = blueW * sstep(0.012, 0.045, C) * sstep(0.15, 0.30, lab.x);
-  lab.x *= 1.0 - 0.27 * uKe * me - 0.34 * uKb * mb;
-  lab.yz *= 1.0 + 0.22 * uKe * me + 0.36 * uKb * mb;
+  float mx = max(y.r, max(y.g, y.b));
+  float sat = (mx - min(y.r, min(y.g, y.b))) / (mx + 0.05);
+  float Y = dot(LUMA, y);
+  float wTop = 1.0 - 0.3 * sstep(0.85, 1.05, Y);
+  float wLum = sstep(0.06, 0.30, Y) * wTop;
+  float dh = hd - 240.0;
+  float wHueB = abs(dh) < 60.0 ? 0.5 * (1.0 + cos(3.141592653589793 * dh / 60.0)) : 0.0;
+  float wSkin = exp(-0.5 * sq(wrap180(hd - 55.0) / 20.0)) * (1.0 - sstep(0.55, 0.85, sat));
+  float we = uKe * sstep(0.25, 0.85, sat) * wLum * (1.0 - 0.7 * wSkin);
+  float mb = wHueB * sstep(0.14, 0.72, sat) * sstep(0.02, 0.15, Y) * wTop;
+  float pe = 1.0;
+  if (we > 0.0 && C > 1e-6) {
+    vec3 lb = linToOklab(pow(max(y, vec3(1e-5)), vec3(1.0 + we)));
+    float rho = length(lb.yz) * lab.x / (max(lb.x, 1e-6) * C) - 1.0;
+    float kap = 0.4 * uKe;
+    pe = 1.0 + kap * tanh(clamp(rho / kap, -15.0, 15.0));
+  }
+  float fL = (1.0 - we) * (1.0 - uKb * mb);
+  lab.x *= fL;
+  lab.yz *= fL * pe * (1.0 + (uKb / 1.3) * mb);
   return srgbEnc(gamutMap(lab));
 }
 `;

@@ -1,4 +1,4 @@
-// docs/RENDERER.md 섹션 6 fs_main.glsl — 정본. Step 4 §5-3 패치(uFilmStrength, lutRaw/lutStage), FSE-v2 §5-7-3~6 패치(ISP: ZS·팝, filmShoulder, hdOp, mhComposite)만 허용.
+// docs/RENDERER.md 섹션 6 fs_main.glsl — 정본. Step 4 §5-3 패치(uFilmStrength, lutRaw/lutStage), FSE-v2 §5-7-3~6 패치(ISP: ZS·팝, filmShoulder, hdOp, mhComposite), OPT-v1 패치(존 분리 베이스 톤, 시그모이드 대비, COLOR_SCIENCE §8.4·§8.5)만 허용.
 export const FS_MAIN_GLSL = `// ===== fs_main : S1~S7b (HDF, micro-halation, dehaze, base tone, contrast, vignette, clip, film shoulder, film LUT, highlight density) =====
 uniform sampler2D uWS;
 uniform bool uToneOps;
@@ -41,16 +41,19 @@ vec3 baseTone(vec3 x, vec2 uvG) {
   float mmid = exp(-0.5 * sq(e / 1.8));
   float msd = exp(-0.5 * sq((e + 3.5) / 1.0));
   float mz = exp(-0.5 * sq((e + 1.5) / 1.2));
-  float dB = 1.5 * uSh * msh + 1.5 * uHi * mhi + 1.0 * uWh * mwh + 1.0 * uBk * mbk + 1.0 * uBr * mmid + 1.2 * uLb * (msh - mhi) - uIspSd * msd;
+  float msh2 = msh * (uSh > 0.0 ? sstep(-7.0, -4.0, e) : 1.0) * (1.0 - sstep(-3.5, 1.5, e));
+  float mhi2 = uHi < 0.0 ? sstep(-1.0, 3.5, e) : mhi;
+  float dB = 1.5 * uSh * msh2 + 1.5 * uHi * mhi2 + 1.0 * uWh * mwh + 1.0 * uBk * mbk + 1.0 * uBr * mmid + 1.2 * uLb * (msh - mhi) - uIspSd * msd;
   float Dt2 = Dt + uIspPop * mz * Dt / (1.0 + sq(Dt / 0.6));
-  float Yp = exp2(Bs + dB + Dt2);
+  float dg = 1.0 + 0.25 * (max(uSh, 0.0) * msh2 + max(-uHi, 0.0) * mhi2);
+  float Yp = exp2(Bs + dB + Dt2 * dg);
   return x * (Yp / Y);
 }
 vec3 contrastOp(vec3 x) {
   float Y = dot(LUMA, x);
   if (Y <= exp2(-20.0)) return x;
   float e = log2(Y) - log2(0.18);
-  float Yp = 0.18 * exp2(e * (1.0 + 0.5 * uCt));
+  float Yp = 0.18 * exp2(e + 0.5 * uCt * e * exp(-0.5 * sq(e / 2.5)));
   return x * (Yp / Y);
 }
 float vignetteF(vec2 uvG) {

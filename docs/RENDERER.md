@@ -116,7 +116,7 @@ S14 디더·출력
 - 원본: v = srgbEnc(toneRef(x))
 ### 5.11 S8 컬러 크롬 이펙트·FX 블루 (흑백 시뮬레이션에서는 끈다)
 - 수식 정본은 COLOR_SCIENCE §10. 명도 곱셈 압축 + 크로마 증폭 → gamutMap
-- uKe, uKb: 끔 0 / 약 0.5 / 강 1
+- uKe, uKb: OPT-v1 농도 계수. uKe 끔 0 / 약 0.075 / 강 0.145, uKb 끔 0 / 약 0.065 / 강 0.13 (COLOR_SCIENCE §10)
 ### 5.12 S9 톤 커브
 - 프리셋 5종, 터치 그래프, 5구간 슬라이더, Fritsch–Carlson: COLOR_SCIENCE §8.7
 - 256칸 굽기: T[i] = F(i/255) 후 단조 보정
