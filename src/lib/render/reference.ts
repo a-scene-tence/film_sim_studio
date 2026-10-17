@@ -233,16 +233,24 @@ export function gamutMap16(L0: number, a: number, b: number): Vec3 {
 // ── S8~S12 ─────────────────────────────────────────────────────────────────
 const toLab = (v: ArrayLike<number>) => linToOklab(map3(v, srgbDec));
 
-/** 섹션 5.11 컬러 크롬 이펙트 / FX 블루 */
+/** 섹션 5.11 컬러 크롬 이펙트 / FX 블루 (COLOR_SCIENCE §10, lib_ops.ts cceOp 와 동일 수식) */
 export function cceOp(v: ArrayLike<number>, ke: number, kb: number): Vec3 {
   const [L, a, b] = toLab(v);
   const C = Math.hypot(a, b);
   const h = Math.atan2(b, a) / DEG;
-  const blue = Math.exp(-0.5 * sq(wrap180(h - 264) / 28));
-  const me = sstep(0.08, 0.2, C) * (1 - blue) * sstep(0.3, 0.7, L);
-  const mb = sstep(0.05, 0.16, C) * blue * sstep(0.2, 0.6, L);
-  const L2 = Math.pow(Math.max(L, 0), 1 + ke * me + kb * mb);
-  return map3(gamutMap16(L2, a, b), srgbEnc);
+  const hd = h < 0 ? h + 360 : h;
+  const [r, g, bl] = [clamp01(v[0]!), clamp01(v[1]!), clamp01(v[2]!)];
+  const mx = Math.max(r, g, bl);
+  const S = (mx - Math.min(r, g, bl)) / Math.max(mx, 1e-4);
+  const hueB = sstep(176, 190, hd) * (1 - sstep(270, 284, hd));
+  const rgbB = sstep(0, 0.04, bl - 1.15 * r) * sstep(0, 0.04, bl - 0.85 * g);
+  const blueW = hueB * rgbB;
+  const skin = sstep(25, 38, hd) * (1 - sstep(68, 82, hd)) * (1 - sstep(0.5, 0.65, S)) * sstep(0.35, 0.5, L);
+  const me = sstep(0.18, 0.45, S) * (1 - blueW) * (1 - 0.5 * skin) * sstep(0.18, 0.25, L) * (1 - sstep(0.92, 0.98, L));
+  const mb = blueW * sstep(0.012, 0.045, C) * sstep(0.15, 0.3, L);
+  const L2 = L * (1 - 0.27 * ke * me - 0.34 * kb * mb);
+  const cs = 1 + 0.22 * ke * me + 0.36 * kb * mb;
+  return map3(gamutMap16(L2, a * cs, b * cs), srgbEnc);
 }
 
 /** 섹션 5.12 채널별 커브 */
