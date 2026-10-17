@@ -71,14 +71,14 @@ describe("STC-v1 상태 모델 · 초기화", () => {
     const st = dirty();
     for (const t of ["film", "light", "curve", "detail"] as const) expect([resetTab(st, t).skinHue, resetTab(st, t).skinSat, resetTab(st, t).skinLum]).toEqual([40, -30, 25]);
   });
-  it("[전체 초기화] 는 세 값을 0 으로, 히스토리 1단계 → 되돌리기로 복구", () => {
+  it("[전체 초기화] 는 세 값을 0 으로, 히스토리 스택을 모두 비움", () => {
     let h = initialHistory({ edit: dirty(), choice: "auto" });
     expect(isEditDefault(h.present.edit)).toBe(false);
-    h = historyReducer(h, { type: "do", label: "전체 초기화", action: { type: "resetAll" } });
+    h = historyReducer(h, { type: "clearAll" });
     expect([h.present.edit.skinHue, h.present.edit.skinSat, h.present.edit.skinLum]).toEqual([0, 0, 0]);
     expect(isEditDefault(h.present.edit)).toBe(true);
-    h = historyReducer(h, { type: "undo" });
-    expect([h.present.edit.skinHue, h.present.edit.skinSat, h.present.edit.skinLum]).toEqual([40, -30, 25]);
+    expect(h.past.length).toBe(0);
+    expect(h.future.length).toBe(0);
   });
   it("새 파일: 히스토리 reset 스냅샷은 0", () => {
     let h = initialHistory({ edit: dirty(), choice: "auto" });

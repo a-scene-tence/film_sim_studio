@@ -346,7 +346,7 @@ export default function Studio() {
     toast(`다시 실행: ${redoText}`, { duration: 1800 });
   }, [redoText, historyLocked, toast]);
 
-  // ── 탭 초기화 / 전체 초기화 (히스토리 1단계로 기록 → 되돌리기로 복구 가능) ──
+  // ── 탭 초기화 / 전체 초기화 (탭 초기화는 히스토리 1단계로 기록, 전체 초기화는 히스토리를 모두 비움) ──
   const tabChanged = !isTabDefault(state, tab);
   const resetCurrentTab = useCallback(() => {
     if (historyLocked) return;
@@ -355,8 +355,8 @@ export default function Studio() {
   }, [historyLocked, tab, toast]);
   const resetAll = useCallback(() => {
     if (historyLocked) return;
-    histDispatch({ type: "do", label: RESET_ALL_LABEL, action: { type: "resetAll" } });
-    toast(RESET_ALL_LABEL, { duration: 4000, actions: [{ label: "되돌리기", onClick: () => histDispatch({ type: "undo" }) }] });
+    histDispatch({ type: "clearAll" });
+    toast(RESET_ALL_LABEL, { duration: 2500 });
   }, [historyLocked, toast]);
 
   const [timelineOpen, setTimelineOpen] = useState(false);
@@ -409,7 +409,7 @@ export default function Studio() {
           hasMedia={asset !== null} busy={loading !== null || exporting}
           p3Available={p3Ok} outSpace={outSpace} onOutSpace={changeOutSpace}
           undoLabel={undoText} redoLabel={redoText} undoDepth={hist.past.length} onUndo={undo} onRedo={redo}
-          resetAllEnabled={!isEditDefault(state)} onResetAll={resetAll}
+          resetAllEnabled={!isEditDefault(state) || hist.past.length > 0 || hist.future.length > 0} onResetAll={resetAll}
           historyCount={timeline.length - 1} onTimeline={() => { if (!historyLocked) setTimelineOpen(true); }}
         />
         <AboutSheet open={aboutOpen} onClose={() => setAboutOpen(false)} />

@@ -1,5 +1,5 @@
 // 편집 히스토리: 트랜잭션(commit) 단위 Undo/Redo 스택 (최대 50단계). 순수 리듀서라 UI 와 무관하게 테스트한다.
-import { editReducer, getValue, SLIDERS, type EditAction, type EditState } from "./state";
+import { editReducer, getValue, initialEditState, SLIDERS, type EditAction, type EditState } from "./state";
 
 export const HISTORY_LIMIT = 50;
 
@@ -31,6 +31,8 @@ export type HistoryAction =
   | { type: "redo" }
   /** 타임라인 점프: 전체 타임라인([...past, present, ...future]) 의 index 상태로 즉시 이동 */
   | { type: "jump"; index: number }
+  /** 전체 초기화: 편집값을 기본값으로 되돌리고 undo/redo 스택을 모두 비운다 (입력 색공간 선택은 유지, 단계로 기록하지 않음) */
+  | { type: "clearAll" }
   /** 새 미디어: 스택을 비우고 기준 상태를 바꾼다 */
   | { type: "reset"; snap: Snap };
 
@@ -81,6 +83,7 @@ export function historyReducer(h: HistoryState, a: HistoryAction): HistoryState 
       return { present: h.future[0]!, past: pushPast(h.past, h.present), future: h.future.slice(1), pending: null };
     }
     case "jump": return jumpToHistoryIndex(h, a.index);
+    case "clearAll": return initialHistory({ edit: initialEditState(), choice: h.present.choice });
     case "reset": return initialHistory(a.snap);
   }
 }
