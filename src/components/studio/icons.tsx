@@ -21,6 +21,7 @@ export const IconDetail = (p: IconProps) => <Svg {...p}><path d="M4 7h10M18 7h2M
 export const IconUndo = (p: IconProps) => <Svg {...p}><path d="M9 14L4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 0 12h-3" /></Svg>;
 export const IconRedo = (p: IconProps) => <Svg {...p}><path d="M15 14l5-5-5-5" /><path d="M20 9H10a6 6 0 0 0 0 12h3" /></Svg>;
 export const IconHistory = (p: IconProps) => <Svg {...p}><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5" /><path d="M12 7v5l3 2" /></Svg>;
+export const IconResetAll = (p: IconProps) => <Svg {...p}><path d="M4 12a8 8 0 1 0 2.5-5.8" /><path d="M4 4v5h5" /><path d="M9 9l6 6M15 9l-6 6" /></Svg>;
 export const IconPlay = (p: IconProps) => <Svg {...p}><path d="M7 4.5v15l12-7.5z" fill="currentColor" /></Svg>;
 export const IconPause = (p: IconProps) => <Svg {...p}><path d="M8 5v14M16 5v14" /></Svg>;
 export const IconVolume = (p: IconProps) => <Svg {...p}><path d="M4 9v6h4l5 4V5L8 9z" /><path d="M16.5 8.5a5 5 0 0 1 0 7" /></Svg>;

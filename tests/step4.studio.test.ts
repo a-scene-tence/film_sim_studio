@@ -71,21 +71,20 @@ describe("T8 SLIDERS 표 · normalizeValue · buildUniforms", () => {
   });
 });
 
-describe("T9 selectFilm / defaultFor (FSE-v2 §6-3, 상세 골든은 tests/fse2.presets.test.ts)", () => {
-  it("필름 강도와 프리셋 밖 키는 그대로, 필름 없음은 중립", () => {
-    const st = { ...initialEditState(), filmStrength: 40, monoHue: 30 };
+describe("T9 selectFilm / defaultFor (필름 선택은 simId 만 교체, 상세는 tests/fse2.presets.test.ts)", () => {
+  it("필름 선택은 simId 외 모든 값을 유지한다", () => {
+    const st = { ...initialEditState(), filmStrength: 40, monoHue: 30, contrast: 12, sharpness: 9 };
     const n = selectFilm(st, "fuji-velvia");
-    expect([n.filmStrength, n.monoHue, n.simId, n.contrast]).toEqual([40, 30, "fuji-velvia", 18]);
-    expect(selectFilm(n, null).sharpness).toBe(0);
+    expect([n.filmStrength, n.monoHue, n.simId, n.contrast, n.sharpness]).toEqual([40, 30, "fuji-velvia", 12, 9]);
+    expect(selectFilm(n, null).sharpness).toBe(9);
   });
-  it("defaultFor: 프리셋 값, 프리셋 밖 키는 §6-2 기본값 (필름 강도 100)", () => {
-    expect(defaultFor("sharpness", "ricoh-hard-monotone")).toBe(14);
-    expect(defaultFor("sharpness", null)).toBe(0);
-    expect(defaultFor("filmStrength", "fuji-provia")).toBe(100);
-    expect(defaultFor("hdfStrength", "ricoh-retro")).toBe(50);
-    expect(defaultFor("zone2", "ricoh-retro")).toBe(0);
-    expect(defaultFor("grainAmount", "fuji-acros")).toBe(40);
-    expect(defaultFor("clarity", "ricoh-hdr-tone")).toBe(70);
+  it("defaultFor: 필름과 무관하게 §6-2 표 기본값 (필름 강도 100, 나머지 0)", () => {
+    expect(defaultFor("sharpness")).toBe(0);
+    expect(defaultFor("filmStrength")).toBe(100);
+    expect(defaultFor("hdfStrength")).toBe(100);
+    expect(defaultFor("zone2")).toBe(0);
+    expect(defaultFor("grainAmount")).toBe(0);
+    expect(defaultFor("clarity")).toBe(0);
   });
   it("커브: 프리셋 판별과 CurveState 왕복", () => {
     const c = editReducer(initialEditState(), { type: "curvePreset", preset: "matte" }).curve;

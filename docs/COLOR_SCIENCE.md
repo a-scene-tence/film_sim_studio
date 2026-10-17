@@ -419,15 +419,14 @@
 - L' = L^(1 + k_e·m_e + k_b·m_b). C 와 h 는 유지해 명도만 비선형 압축한다. 이어서 gamutMap(§6.6), srgbEnc.
 
 ## §11 은염 클럼핑 그레인 (S15, 표시 인코딩 v)
-- 노이즈: 격자 해시 값 노이즈(§16.13). 구 심플렉스 snoise(webgl-noise) 구현은 §16.13 으로 대체됨
-- 파라미터: 강도 A ∈ [0,100], 크기 Sz ∈ [0,100], seed (사진 0, 영상 프레임 번호)
-- 크기 배율 mul(Sz): Sz 0 → 1.0, 50 → 1.65, 100 → 2.5 (구간 선형). coarse = Sz/100
-- scale = max(0.25, 출력 짧은 변 픽셀/1080)·mul(Sz)  (짧은 변을 1080 가상 프레임으로 정규화 — 해상도와 무관하게 프레임 대비 입자 크기 일정)
+- 노이즈: 픽셀 격자 위 삼각 PDF 백색 노이즈 + 짧은 커널(§16.13). 저주파 격자 보간 노이즈(구 값 노이즈·simplex)는 구름 얼룩을 만들어 폐기
+- 파라미터: 거칠기 A ∈ [0,100] (OFF 0 / 약 35 / 강 70 + 미세 슬라이더), 크기 Sz ∈ {0 소, 100 대}, seed (사진 0, 영상 프레임 번호)
+- coarse = Sz/100 (대 = 3×3 클러스터 중첩 비율), scale = max(1, 출력 짧은 변 픽셀/1080)  (1080 이하는 1px 셀. 크기 소/대는 scale 이 아니라 커널로 구분한다)
 - off = (fract(seed·0.754877666)·1000, fract(seed·0.569840291)·1000)
-- q = 출력 픽셀좌표/(scale·GRAIN_CELL) + off, n = §16.13 의 grainNoise(q, coarse)
-- vl = 0.2126v_r + 0.7152v_g + 0.0722v_b, resp = 0.4 + 0.6·sqrt(4·vl·(1 − vl))  (바닥값 0.4: 하이라이트·암부에서도 그레인 유지)
-- v' = clamp(v + 0.205·(A/100)·resp·n, 0, 1). 세 채널에 같은 n 을 더한다(휘도 그레인). (구 계수 0.07 의 약 2.93배)
-- 프리뷰 축소율 f = (출력 짧은 변)/(렌더 짧은 변) 일 때 scale_preview = max(0.5, scale/f)
+- 셀 c = floor(px/scale + off), n = §16.13 의 grainNoise(c, coarse)  (표준편차 1)
+- vl = 0.2126v_r + 0.7152v_g + 0.0722v_b, resp = 0.2 + 0.8·4·vl·(1 − vl)  (중간톤에서 1, 하이라이트·암부에서 바닥 0.2 로 필름 농도에 묻힘)
+- v' = clamp(v + 0.06·(A/100)·resp·n, 0, 1). 세 채널에 같은 n 을 더한다(휘도 그레인). 표준편차는 강(70) 중간톤에서 약 0.042.
+- 프리뷰 축소율 f = (출력 짧은 변)/(렌더 짧은 변) 일 때 scale_preview = max(1, scale/f)
 
 ## §12 원터치 자동 보정 (CPU, S0 직후 긴 변 256px 프록시)
 - Y = max(luma709, 1e-6), logAvg = exp(mean(ln Y))
@@ -538,12 +537,13 @@
 - 자동 채도·생동감: temp·tint 는 바꾸지 않고, 현재 편집 상태의 (temp, tint) 로 wbMatrix 를 적용한 유효 픽셀의 mC·fs 로 vibrance·saturation 만 계산한다 (히스토리 "자동 채도·생동감"). 수식은 §16.10 3)과 같다. computeAutoColor 는 두 단계를 이어 붙인 기존 결과와 같다.
 
 ### §16.13 후지필름 그레인 이펙트 (은염 입자 노이즈, src/lib/render/grain.ts)
-- 프리셋(거칠기 × 크기): OFF (0, 0) / 약·소 (35, 0) / 약·대 (35, 100) / 강·소 (70, 0) / 강·대 (70, 100) = (그레인 강도, 그레인 크기). 슬라이더 값이 프리셋과 정확히 같을 때만 버튼이 선택 표시된다(강도 0 은 OFF).
-- 격자 해시: h(i, j, s) = pcg3d(i, j, s).x / 2³² · 2 − 1 (i, j 는 uint 로 해석). valueNoise(q, s) = 격자 4점 h 를 quintic 보간(t³(6t² − 15t + 10))한 값, 범위 [−1, 1].
-- q = 출력 픽셀좌표/(scale·GRAIN_CELL) + off, GRAIN_CELL = 2.2 (픽셀 단위 salt-and-pepper 방지).
-- n = 1.25·(0.62·V(q, 0) + 0.26·V(2.03q + (17.13, 41.71), 1) + 0.5·coarse·V(0.5q + (29.3, 5.9), 2))·(0.65 + 0.35·V(0.37q + (3.7, 9.1), 3))  (기본 + 미세 + 큰 입자 옥타브, 저주파 변조로 군집). 표준편차 약 0.26 (구 구현과 같은 수준이라 계수 0.205 유지).
+- UI 는 후지필름 카메라 메뉴와 같은 2단 스위치: 거칠기 [OFF / 약 / 강] (그레인 강도 0 / 35 / 70, 미세 슬라이더 병행) × 크기 [소 / 대] (그레인 크기 0 / 100). 연속 크기 슬라이더는 UI 에서 제거했다(내부 값 grainSize 는 레시피 호환을 위해 유지).
+- 셀 해시: (u1, u2) = (pcg3d(i, j, s).x, pcg3d(i, j, s).y)/2³², T(i, j, s) = (u1 + u2 − 1)·√6  (삼각 PDF, 평균 0, 표준편차 1. i, j 는 uint 로 해석)
+- 크기 소 (F): F(c) = (0.7·T(c, 0) + 0.075·(T(c±x̂, 0) + T(c±ŷ, 0)))/σF, σF = √(0.7² + 4·0.075²). 중심 70% + 상하좌우 4셀 30%, 유효 반경 ≈ 1.0~1.15px.
+- 크기 대 (C): C(c) = (Σ_{dx,dy∈{−1,0,1}} (2−|dx|)(2−|dy|)·T(c + (dx, dy), 1)/16)/0.375  (가중 [1 2 1; 2 4 2; 1 2 1], 독립 시드 1, 유효 반경 ≈ 1.4~1.65px).
+- n = (wf·F + wc·C)/√(wf² + wc²), wc = 0.55·coarse, wf = 1 − wc. coarse 0 → n = F, coarse 1 → 고주파 미세 입자 45% + 3×3 클러스터 55%. 어느 쪽도 저주파 보간이 없으므로 확대해도 흐린 얼룩이 생기지 않는다.
 - 세 채널에 같은 n 을 더하는 휘도 변조(색 노이즈 없음). 루미넌스 마스크와 최종 강도 식은 §11 그대로.
-- 골든(1e-6): grainNoise(100.5, 200.5, 2, (0,0), 0) → −0.104379 / grainNoise(10.5, 20.5, 1, (123.4, 567.8), 0) → 0.058362 / coarse 1 → 0.035730 / valueNoise((0.5, 0.25), 0) → 0.219603.
+- 골든(1e-6): T(3, 4, 0) → −0.338699 / grainNoise(100.5, 200.5, 2, (0,0), 0) → 0.871585 / grainNoise(10.5, 20.5, 1, (123.4, 567.8), 0) → 0.270270 / coarse 1 → 0.864418 / grainNoise(100.5, 200.5, 1, (0,0), 1) → −1.404488.
 
 ### §16.11 WB 스포이트
 - 사용자가 프리뷰를 탭한 표시 이미지 정규화 좌표 (u, v) → 긴 변 1024 Pre-WB 격자의 픽셀 (floor(u·W), floor(v·H)). 그 주변 5×5 창(경계에서는 잘라냄)의 선형 RGB 평균 s 를 구한다.
@@ -731,11 +731,11 @@ LUT 굽기 검사: 구운 .bin 을 테트라 보간으로 조회한 값과 커�
 ## §20 Film Presets (지시서 6-3)
 32종 프리셋 표의 SSOT 는 **src/lib/render/film-presets.ts** (FILM_PRESETS, NEUTRAL_PRESET, PRESET_KEYS) 이다. 이 문서에 값을 복제하지 않는다. LUT(§18)는 색만, 이 표는 빛·톤·질감만 담당한다.
 선택 규칙 (리듀서 순수 함수 selectFilm, resetForNewMedia — src/lib/studio/state.ts):
-- selectFilm(id): id 가 null 이 아니면 PRESET_KEYS 의 모든 값을 FILM_PRESETS[id] 로 통째로 교체한다. id 가 null(필름 없음)이면 NEUTRAL_PRESET 으로 교체한다. 이전 필름의 값은 하나도 남기지 않는다. filmStrength, monoHue, monoAmount, 입력 색공간은 바꾸지 않는다.
-- 이미 선택된 필름 카드를 다시 탭하면 selectFilm(같은 id) 를 실행하고(사용자 가감값을 프리셋으로 되돌림) 토스트 "{필름 한글명} 기본 보정을 다시 적용했습니다" 를 띄운다.
-- resetForNewMedia(): 새 파일이나 데모를 열 때 simId = null, NEUTRAL_PRESET, filmStrength 100, monoHue 0, monoAmount 0, 입력 색공간 Auto 로 둔다.
+- selectFilm(id): simId 만 교체한다(null = 필름 없음). PRESET_KEYS 에 해당하는 상세 조정값, filmStrength, monoHue, monoAmount, 입력 색공간은 바꾸지 않는다. FILM_PRESETS 수치는 편집 상태로 복사하지 않는 참고 값이다.
+- 이미 선택된 필름 카드를 다시 탭해도 아무 일도 일어나지 않는다.
+- resetForNewMedia() (= initialEditState()): 새 파일이나 데모를 열 때 simId = null, 모든 보정 0,  filmStrength 100, monoHue 0, monoAmount 0, 입력 색공간 Auto 로 둔다.
 - 데모 사진은 resetForNewMedia() 다음 selectFilm('fuji-classic-chrome') 만 실행한다.
-- 슬라이더 더블탭 기본값: defaultFor(key) = (simId ? FILM_PRESETS[simId] : NEUTRAL_PRESET)[key].
+- 슬라이더 더블탭 기본값: defaultFor(key) = §6 표 기본값(필름과 무관). 탭별 초기화(resetTab)·전체 초기화(resetAll)는 docs/STUDIO.md §초기화.
 - 자동 보정(FLA-v1)은 지금처럼 라이트 8개 값만 바꾼다. 커스텀 레시피 적용은 레시피 값으로 전체 교체한다(selectFilm 을 거치지 않는다).
 - 키 대응(6-2): temperature→temp, colorChrome→cce, colorChromeBlue→ccb, sharpen→sharpness, hdfEnabled→hdf, toneCurve→curve, 그 밖의 키는 같은 이름(dRange 신규). 커브 preset ≠ 'custom' 이면 points = Step 3 CURVE_PRESETS[대응 키] (linear→linear, medium→weak-contrast, strong→strong-contrast, matte→matte, softHighlight→soft-highlight), zones 그대로.
 - 범위(6-6): 모든 프리셋 값은 슬라이더 표를 통과한다(normalizeValue(key, v) === v). dRange ∈ {100, 200, 400}, colorChrome·colorChromeBlue ∈ {0, 1, 2}, custom 커브 points 는 x 가 0 에서 시작해 1 로 끝나고 엄격히 증가하며 2~8개 (tests/fse2.presets.test.ts).

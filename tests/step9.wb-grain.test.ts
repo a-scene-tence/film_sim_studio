@@ -2,8 +2,9 @@
 import { describe, expect, it } from "vitest";
 import { FS_FINAL_GLSL } from "../src/lib/render/glsl/fs_final";
 import { FILM_PRESETS } from "../src/lib/render/film-presets";
-import { grainCoarse, grainScaleFull, grainScalePreview, grainSizeMul } from "../src/lib/render/plan";
-import { GRAIN_FLOOR, GRAIN_GAIN, grainApply, pixelPipelineFromWs, type PixelCtx } from "../src/lib/render/reference";
+import { grainCoarse, grainScaleFull, grainScalePreview } from "../src/lib/render/plan";
+import { GRAIN_FLOOR, GRAIN_GAIN } from "../src/lib/render/grain";
+import { grainApply, pixelPipelineFromWs, type PixelCtx } from "../src/lib/render/reference";
 import { apply3, wbMatrix } from "../src/lib/render/wb";
 import { solveEyedropperOutput, solveNeutralOutput, type RgbaGrid } from "../src/lib/studio/color-auto";
 
@@ -74,34 +75,33 @@ describe("스포이트: 필름 적용 후 출력 기준 중성 역산", () => {
 });
 
 describe("그레인 강화", () => {
-  it("입자 크기: Small 1.0× / Medium 1.65× / Large 2.5×", () => {
-    expect(grainSizeMul(0)).toBeCloseTo(1, 9);
-    expect(grainSizeMul(50)).toBeCloseTo(1.65, 9);
-    expect(grainSizeMul(100)).toBeCloseTo(2.5, 9);
+  it("크기 소/대: 입자 격자는 키우지 않고 3×3 클러스터 중첩 비율만 0 → 1", () => {
     expect(grainCoarse(0)).toBe(0);
     expect(grainCoarse(100)).toBe(1);
   });
-  it("해상도 독립: 짧은 변 1080 기준 정규화 (프레임 대비 입자 크기 일정)", () => {
-    expect(grainScaleFull(1080, 0)).toBeCloseTo(1, 9);
-    expect(grainScaleFull(2160, 0) / 2160).toBeCloseTo(grainScaleFull(1080, 0) / 1080, 9);
-    expect(grainScaleFull(4000, 50) / 4000).toBeCloseTo(grainScaleFull(1000, 50) / 1000, 9);
-    // 미리보기는 렌더 배율만큼 줄어든다 (저장본과 같은 프레임 비율)
-    expect(grainScalePreview(4320, 1080, 0)).toBeCloseTo(1, 9);
+  it("해상도 독립: 짧은 변 1080 기준 정규화, 1080 이하에서는 1px 셀", () => {
+    expect(grainScaleFull(1080)).toBeCloseTo(1, 9);
+    expect(grainScaleFull(720)).toBe(1);
+    expect(grainScaleFull(2160) / 2160).toBeCloseTo(grainScaleFull(1080) / 1080 * 1, 9);
+    expect(grainScaleFull(4320)).toBeCloseTo(4, 9);
+    // 미리보기는 렌더 배율만큼 줄어든다 (저장본과 같은 프레임 비율, 최소 1px 셀)
+    expect(grainScalePreview(4320, 1080)).toBeCloseTo(1, 9);
+    expect(grainScalePreview(4320, 2160)).toBeCloseTo(2, 9);
   });
-  it("강도 계수 ≈ 구 0.07 의 3배, 하이라이트·암부에서도 바닥값 이상", () => {
-    expect(GRAIN_GAIN / 0.07).toBeGreaterThan(2.8);
-    expect(GRAIN_GAIN / 0.07).toBeLessThan(3.2);
-    expect(GRAIN_FLOOR).toBeGreaterThanOrEqual(0.35);
+  it("강도 계수·중간톤 응답: 중간톤 최대, 하이라이트·암부는 바닥값 이상", () => {
+    expect(GRAIN_GAIN).toBeLessThan(0.1);
     const mid = grainApply([0.5, 0.5, 0.5], 100, 1)[0]! - 0.5;
     const dark = grainApply([0.02, 0.02, 0.02], 100, 1)[0]! - 0.02;
     const bright = 0.95 - grainApply([0.95, 0.95, 0.95], 100, -1)[0]!;
     expect(mid).toBeCloseTo(GRAIN_GAIN, 9);
     expect(dark).toBeGreaterThan(GRAIN_GAIN * GRAIN_FLOOR);
+    expect(dark).toBeLessThan(mid);
     expect(bright).toBeGreaterThan(GRAIN_GAIN * GRAIN_FLOOR);
+    expect(bright).toBeLessThan(mid);
   });
   it("GLSL 이 CPU 참조와 같은 상수를 쓴다", () => {
     expect(FS_FINAL_GLSL).toContain(`${GRAIN_GAIN} * (uGrainAmt / 100.0)`);
-    expect(FS_FINAL_GLSL).toContain(`float resp = ${GRAIN_FLOOR} + ${1 - GRAIN_FLOOR}`);
+    expect(FS_FINAL_GLSL).toContain(`float resp = ${GRAIN_FLOOR} + (1.0 - ${GRAIN_FLOOR}) * max(4.0 * vl * (1.0 - vl), 0.0);`);
     expect(FS_FINAL_GLSL).toContain("uniform float uGrainCoarse");
   });
   it("필름 프리셋 기본 그레인이 체감되는 수준", () => {

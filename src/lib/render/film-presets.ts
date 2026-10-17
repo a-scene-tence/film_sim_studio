@@ -1,4 +1,4 @@
-// src/lib/render/film-presets.ts — 32종 필름 상세 보정 프리셋 (FSE-v2). 필름 선택 시 이 값으로 슬라이더를 통째로 교체한다.
+// src/lib/render/film-presets.ts — 32종 필름 상세 보정 프리셋 (FSE-v2). 스튜디오의 필름 선택은 simId 만 바꾸며 이 값을 슬라이더로 복사하지 않는다(레시피·Lab·테스트용 참고 수치).
 // 값은 UI 단위(§6 슬라이더 표). LUT(scripts/fse2-kernel.mjs)는 색만, 이 표는 빛·톤·질감만 담당한다.
 export type CurvePresetId = 'linear' | 'medium' | 'matte' | 'softHighlight' | 'strong' | 'custom';
 export type FilmPreset = {

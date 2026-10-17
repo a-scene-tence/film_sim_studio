@@ -17,7 +17,7 @@
 | (D) 입력 바인딩 | resolveInputBinding | **추출** `resolveInputBinding(descriptor, userLut)` (render/binding.ts) | 기존 renderer.ts 의 private `profileIndex`/`normalizeUniforms` 를 순수 함수로 뺌 |
 | (E) 렌더 파라미터 | RenderParams, buildUniforms | `RenderParams`, `effectiveParams`, `scalarUniforms` (render/params.ts) + **신규** `buildRenderParams(EditState)`, `buildUniforms(EditState, mono)` (studio/uniforms.ts) | `RenderParams.absolute` 추가(아래 §6-3) |
 | (F) 필름 조회 | simRecipe | `simRecipe(simId, sims)` → `{ brand, mono, ko }` (studio/state.ts, manifest 기반) | FSE-v2: 숨은 레시피 표(recipeFor)·shaderHints 삭제, 필름 프리셋은 §FSE-v2 매핑 참고 |
-| (G) 그레인 | — | `grainScalePreview/grainScaleFull(outLong, …, size)`, `grainOffset(seed)` (render/plan.ts) | |
+| (G) 그레인 | — | `grainScalePreview(outShort, rShort)/grainScaleFull(outShort)`, `grainCoarse(size)`, `grainOffset(seed)` (render/plan.ts) | |
 | (H) 사용자 소스 LUT | — | lutStore (`putLut/getLut/listLuts/deleteLut`) + **신규** `registerSourceLut/findSourceLut/removeSourceLut` (lut/sourceLut.ts) | role "source-transform", sourceProfile "samsung-log" / "dji-dlog-m" |
 | (I) 미디어 로더 | — | `loadMedia(file, cb) → MediaAsset { kind, proxy, exif, descriptor, detection, histogram, … }` (media-loader.ts) | |
 | (I) 메모리 예산 | getMemoryBudget | `getBudget().budgetBytes` (media/budget.ts) | iOS 320MB / Android 448MB / 그 밖 1024MB |
@@ -44,7 +44,7 @@ Step 3 톤 커브 프리셋 키는 지시서의 표기와 달라 실제 키를 �
 | sharpness | 디테일 | 선명도 | 0 | 150 | 1 | 0 | 정수 | uSharpen = v |
 | clarity · dehaze | 디테일 | 명료도·디헤이즈 | −100 | 100 | 1 | 0 | 부호 정수 | uClarity·uDehaze = v |
 | hdfStrength | 디테일 | 확산 강도 | 0 | 200 | 1 | 100 | 100% | uHdfK = v/100 |
-| grainAmount · grainSize | 디테일 | 그레인 강도·크기 | 0 | 100 | 1 | 0 | 정수 | uGrainAmt = v, uGrainScale = grainScale*(size) |
+| grainAmount · grainSize | 디테일 | 그레인 거칠기(강도)·크기 | 0 | 100 | 1 | 0 | 정수 | uGrainAmt = v, uGrainCoarse = size/100 (UI 는 크기 소 0 / 대 100 스위치만 노출) |
 | vignette | 디테일 | 비네팅 | −100 | 100 | 1 | 0 | 부호 정수 | uVig = v |
 | zone0..zone4 | 커브 | 블랙/섀도/미드톤/라이트/화이트 | −100 | 100 | 1 | 0 | 부호 정수 | bakeCurve zones[k] (중심 0.1/0.3/0.5/0.7/0.9) |
 
@@ -52,13 +52,13 @@ Step 3 톤 커브 프리셋 키는 지시서의 표기와 달라 실제 키를 �
 
 FSE-v2: 그 밖에 `dRange`(D레인지 100/200/400, 라이트 탭 세그먼트, 기본 100)를 슬라이더가 아닌 `EditState.dRange` 로 따로 둔다(`normalizeDRange`).
 
-### 필름 선택 = 프리셋으로 통째로 교체 (FSE-v2, `selectFilm`) — 아래 "§FSE-v2" 절 참고
+### 필름 선택 = simId 만 교체 (`selectFilm`) — 상세 조정값은 건드리지 않는다. 탭별 초기화·전체 초기화는 "§초기화" 참고
 ### 새 미디어 열기 = 완전 초기화 (`resetForNewMedia()` / `mediaOpenState(demo)`, Studio.openFile)
 사용자 파일(사진·RAW·동영상)을 열면 이전 미디어의 편집 내역을 하나도 이어받지 않는다.
 - 편집 상태: `resetForNewMedia()` — 필름 없음(simId null), NEUTRAL_PRESET(모든 보정 0, 확산 강도 100%, HDF 끔, 톤 커브 linear, DR100), 필름 강도 100%, 흑백 조색 0.
 - 뷰: 줌/팬 1×(Preview 가 asset.id 변경 시), 원본 비교 끔, WB 스포이트 끔, 입력 색공간 자동.
 - 히스토리: `reset` 으로 past/future/드래그 대기 상태를 비우고 타임라인은 "초기 상태" 1개만 남는다.
-- 데모 사진은 `resetForNewMedia()` 다음 `selectFilm('fuji-classic-chrome')` 만 실행한다(이전의 HDF 강제는 삭제).
+- 데모 사진은 `resetForNewMedia()` 다음 `selectFilm('fuji-classic-chrome')` 만 실행한다(필름만 바뀌고 모든 보정은 0).
 
 **절대 모드(`RenderParams.absolute = true`)**: 스튜디오는 슬라이더 값이 곧 실효값이다. FSE-v2 에서 숨은 레시피 레이어는 삭제되어 `absolute = false`(/lab/renderer)도 사용자 값을 clamp 할 뿐 아무것도 더하지 않는다. /lab/renderer 는 필름 프리셋을 적용하지 않고 LUT·ISP 만 보여 준다(프리셋 값은 칩 아래 작은 글씨로 표시).
 
@@ -131,7 +131,7 @@ FSE-v2: 그 밖에 `dRange`(D레인지 100/200/400, 라이트 탭 세그먼트, 
 ### §FSE-v2 매핑 (지시서 2-3, 실제 파일·함수)
 | 항목 | 지시서 이름 | 실제 위치 (업그레이드 전 → 후) |
 |---|---|---|
-| (A) 필름 선택 시 슬라이더 0 고정 | — | 전: `simDefaults()` + `selectSim()`(부분 덮어쓰기) — src/lib/studio/state.ts, 전부 중립인 `RECIPES` 표 + `recipeFor()` — src/lib/render/recipes.ts, 숨은 레시피 레이어 — `effectiveParams` (render/params.ts). 후: **모두 삭제**, `selectFilm()` 이 FILM_PRESETS 로 통째로 교체 |
+| (A) 필름 선택 시 슬라이더 0 고정 | — | 전: `simDefaults()` + `selectSim()`(부분 덮어쓰기) — src/lib/studio/state.ts, 전부 중립인 `RECIPES` 표 + `recipeFor()` — src/lib/render/recipes.ts, 숨은 레시피 레이어 — `effectiveParams` (render/params.ts). 후: **모두 삭제**, `selectFilm()` 은 simId 만 교체(상세 조정 불변) |
 | (B) LUT 대비·채도 축소 | — | 전: src/lib/color/fse/film-params.mjs 의 필름별 tone{a,d,hdrMax,midOut}·sat·desat·fade(이전 재튜닝 값) + engine.mjs `filmTone`(톤 소프트 니)·`skinWeight`(피부 보호)·`renderPoint`, constants.mjs KNEE_*/SKIN_*/DESAT_*/SPLIT_* → scripts/generate-luts.mjs 가 renderPoint 로 굽기. 후: **모두 삭제**, film-params 는 메타데이터만, scripts/fse2-kernel.mjs `renderPoint2(x, SIMS2[id])` 로 굽기 |
 | (C) 편집 상태·필름 선택·새 파일 초기화 | EditState, selectSim | `EditState`(+`dRange`), 리듀서 `editReducer` 의 `{ type: "selectFilm", simId }`·`{ type: "setDRange" }`, `selectFilm`, `resetForNewMedia`, `mediaOpenState(demo)`(Studio.openFile 에서 호출) — src/lib/studio/state.ts. 키 대응 `presetToState`·`stateKeyOf`·`CURVE_ID` 도 같은 파일 |
 | (D) 렌더 파라미터 → 유니폼 | buildUniforms | `buildRenderParams`/`buildUniforms` (studio/uniforms.ts, `dRange` 추가) → `RenderParams.dRange` → `FilmRenderer.ispFor(renderScale)` → `ispUniforms()` (render/isp.ts) → `ChainParams.isp` → `RenderGraph.mainPass/normalize/finalPass` (render/graph.ts) |
@@ -142,12 +142,18 @@ FSE-v2: 그 밖에 `dRange`(D레인지 100/200/400, 라이트 탭 세그먼트, 
 | (I) 커브 프리셋 | Step 3 PRESETS | `CURVE_PRESETS` (render/curve.ts): linear, weak-contrast, strong-contrast, matte, soft-highlight. 프리셋 id 대응 medium→weak-contrast, strong→strong-contrast, softHighlight→soft-highlight |
 
 ### 선택 규칙 (지시서 6-3)
-- `selectFilm(id)`: id ≠ null 이면 PRESET_KEYS 24개를 FILM_PRESETS[id] 로 통째로 교체, null 이면 NEUTRAL_PRESET. 이전 필름의 값은 남지 않는다. filmStrength·monoHue·monoAmount·입력 색공간은 그대로.
-- 이미 선택된 필름 카드를 다시 탭하면 `selectFilm(같은 id)` + 토스트 "{필름 한글명} 기본 보정을 다시 적용했습니다" (FilmTab). 히스토리에 1단계로 남는다(값이 달라졌을 때만).
-- `resetForNewMedia()`: simId null, NEUTRAL_PRESET, filmStrength 100, monoHue 0, monoAmount 0, 입력 색공간 Auto. 데모는 이어서 `selectFilm('fuji-classic-chrome')` 만.
-- 더블탭 기본값 `defaultFor(key, simId)` = 현재 필름(없으면 NEUTRAL) 프리셋 값. 프리셋 밖 키(필름 강도·흑백 조색)는 §6 기본값.
-- 라이트 자동 보정은 3모드(전체 평균 / 하이라이트 우선 / 암부·역광 우선, COLOR_SCIENCE §16.12)로 라이트 8개 값을 바꾸며 하이라이트 우선만 D레인지를 함께 정한다. 컬러 자동 보정은 [자동 화이트밸런스](temp·tint)와 [자동 채도·생동감](vibrance·saturation)으로 분리(§16.12b). 디테일 탭 그레인은 OFF/약·소/약·대/강·소/강·대 원터치 + 슬라이더(§16.13). 커스텀 레시피 적용은 레시피 값으로 전체 교체(selectFilm 을 거치지 않음, dRange 포함, v1 레시피는 dRange 100).
-- 썸네일(필름 카드)도 `selectFilm` 으로 렌더하므로 프리셋이 반영된 모습이다.
+- `selectFilm(id)`: `simId` 만 교체한다. 노출·대비·커브·D레인지·그레인·HDF 등 모든 상세 조정값(과 filmStrength·흑백 조색·입력 색공간)은 사용자가 둔 값 그대로다. FILM_PRESETS 는 편집 상태로 복사되지 않는다(레시피·Lab·테스트 참고 수치).
+- 같은 필름 카드를 다시 탭해도 아무 일도 일어나지 않는다(히스토리에도 쌓이지 않음).
+- `resetForNewMedia()` = `initialEditState()`: simId null, 모든 보정 0, 확산 강도 100%, HDF 끔, 톤 커브 linear, DR100, filmStrength 100, 흑백 조색 0, 입력 색공간 Auto. 데모는 이어서 `selectFilm('fuji-classic-chrome')` 만.
+- 더블탭 기본값 `defaultFor(key)` = §6 표 기본값 (필름과 무관).
+- 필름 탭 UI = 필름 카드 + 필름 강도 슬라이더뿐이다.
+
+### §초기화 (탭별 · 전체)
+- 탭 패널 헤더 우측 [초기화] (`TabResetBar`): `resetTab(state, tab)` 로 그 탭의 값만 기본으로 되돌리고, 이미 기본이면 비활성(`isTabDefault`). 히스토리 1단계: "필름 탭 초기화" / "라이트 탭 초기화" / "컬러 탭 초기화" / "커브 탭 초기화" / "디테일 탭 초기화".
+  - 필름: simId null, filmStrength 100 · 라이트: dRange DR100 + 라이트 밸런스·노출·밝기·대비·하이라이트·쉐도우·흰색·검정 0 · 컬러: 색온도·틴트·채도·생동감·흑백 조색 0, 컬러 크롬·FX 블루 끔 · 커브: 프리셋·포인트·5구간 선형 · 디테일: 선명도·명료도·디헤이즈·그레인 강도/크기·비네팅 0, HDF 끔(확산 강도는 기본 100%).
+- 헤더 [전체 초기화] 아이콘 버튼 (`resetAll`, `isEditDefault` 가 아니면 활성): `initialEditState()` 로 교체하고 히스토리에 "전체 초기화" 1단계로 기록 → [되돌리기] 로 복구. 입력 색공간 선택은 유지한다.
+- 라이트 자동 보정은 3모드(전체 평균 / 하이라이트 우선 / 암부·역광 우선, COLOR_SCIENCE §16.12)로 라이트 8개 값을 바꾸며 하이라이트 우선만 D레인지를 함께 정한다. 컬러 자동 보정은 [자동 화이트밸런스](temp·tint)와 [자동 채도·생동감](vibrance·saturation)으로 분리(§16.12b). 디테일 탭 그레인은 후지필름 메뉴와 같은 거칠기 [OFF/약/강] + 크기 [소/대] 2단 스위치 + 거칠기 미세 슬라이더(§16.13). 커스텀 레시피 적용은 레시피 값으로 전체 교체(selectFilm 을 거치지 않음, dRange 포함, v1 레시피는 dRange 100).
+- 썸네일(필름 카드)은 현재 편집 값 위에 그 필름만 얹어 렌더한다.
 
 ### UI 변경 (지시서 6-4)
 - [라이트] 탭: 자동 보정 3버튼 바로 아래 "D레인지" 세그먼트 [DR100] [DR200] [DR400] + 보조 문구 "RAW·Log 영상은 하이라이트를 더 넓게 보존합니다. JPEG 은 하이라이트 밀도만 바뀝니다."

@@ -5,8 +5,8 @@ import { FILM_PRESETS, NEUTRAL_PRESET, PRESET_KEYS, type FilmPreset } from "@/li
 import { FILM_SIMS } from "@/lib/color/fse/film-params.mjs";
 import { applyRecipe, recipeFromState, validateRecipe } from "@/lib/studio/recipes";
 import {
-  CURVE_ID, defaultFor, editReducer, getValue, initialEditState, mediaOpenState, normalizeValue, presetTick, presetToState, resetForNewMedia, selectFilm,
-  SLIDERS, stateKeyOf, type EditState, type PresetKey, type SliderKey,
+  CURVE_ID, defaultFor, editReducer, getValue, initialEditState, mediaOpenState, normalizeValue, presetToState, resetForNewMedia, selectFilm,
+  stateKeyOf, type EditState, type PresetKey, type SliderKey,
 } from "@/lib/studio/state";
 import { historyReducer, initialHistory } from "@/lib/studio/history";
 
@@ -69,60 +69,61 @@ describe("U12 리듀서 골든 (6-7)", () => {
     expect(st).toEqual(initialEditState());
     expect(mediaOpenState(false)).toEqual(st);
   });
-  it("2) selectFilm('fuji-classic-chrome') → 프리셋 그대로", () => {
-    const st = selectFilm(resetForNewMedia(), "fuji-classic-chrome");
-    expectMatches(st, FILM_PRESETS["fuji-classic-chrome"]!);
-    expect([st.contrast, st.cce, st.grainAmount, st.vignette, st.dRange]).toEqual([12, 2, 35, -8, 200]);
+  it("2) selectFilm('fuji-classic-chrome') → simId 만 바뀌고 모든 상세 조정은 초기값(0 / OFF / DR100) 유지", () => {
+    const base = resetForNewMedia();
+    const st = selectFilm(base, "fuji-classic-chrome");
+    expect(st.simId).toBe("fuji-classic-chrome");
+    expect({ ...st, simId: null }).toEqual(base);
+    expect([st.contrast, st.cce, st.grainAmount, st.vignette, st.dRange]).toEqual([0, 0, 0, 0, 100]);
+    expectMatches(st, NEUTRAL_PRESET);
   });
-  it("3) clarity 40, grainAmount 0 으로 바꾼 뒤 velvia → velvia 와 같음", () => {
+  it("3) clarity 40, grainAmount 20 으로 바꾼 뒤 velvia → 사용자 값 그대로", () => {
     let st = selectFilm(resetForNewMedia(), "fuji-classic-chrome");
     st = editReducer(st, { type: "set", key: "clarity", value: 40 });
-    st = editReducer(st, { type: "set", key: "grainAmount", value: 0 });
+    st = editReducer(st, { type: "set", key: "grainAmount", value: 20 });
+    st = editReducer(st, { type: "setDRange", value: 400 });
     st = editReducer(st, { type: "selectFilm", simId: "fuji-velvia" });
-    expectMatches(st, FILM_PRESETS["fuji-velvia"]!);
-    expect([st.clarity, st.grainAmount, st.grainSize, st.vignette, st.cce, st.curve.preset, st.dRange]).toEqual([6, 0, 0, -6, 1, "weak-contrast", 100]);
+    expect(st.simId).toBe("fuji-velvia");
+    expect([st.clarity, st.grainAmount, st.grainSize, st.vignette, st.cce, st.curve.preset, st.dRange]).toEqual([40, 20, 0, 0, 0, "linear", 400]);
   });
-  it("4) selectFilm(null) → NEUTRAL_PRESET", () => {
-    const st = selectFilm(selectFilm(resetForNewMedia(), "ricoh-hi-contrast-bw"), null);
-    expectMatches(st, NEUTRAL_PRESET);
-    expect(st).toEqual(resetForNewMedia());
+  it("4) selectFilm(null) → simId 만 null, 상세 조정은 유지", () => {
+    const edited = editReducer(selectFilm(resetForNewMedia(), "ricoh-hi-contrast-bw"), { type: "set", key: "contrast", value: 25 });
+    const st = selectFilm(edited, null);
+    expect(st.simId).toBeNull();
+    expect({ ...st, simId: edited.simId }).toEqual(edited);
+    expect(st.contrast).toBe(25);
   });
-  it("5) velvia 에서 clarity 더블탭 → 6, none 에서 → 0", () => {
+  it("5) 슬라이더 더블탭은 필름과 무관하게 §6-2 기본값(0)으로", () => {
     let st = editReducer(selectFilm(resetForNewMedia(), "fuji-velvia"), { type: "set", key: "clarity", value: 33 });
     st = editReducer(st, { type: "reset", key: "clarity" });
-    expect(st.clarity).toBe(6);
-    let n = editReducer(resetForNewMedia(), { type: "set", key: "clarity", value: 33 });
-    n = editReducer(n, { type: "reset", key: "clarity" });
-    expect(n.clarity).toBe(0);
-    expect(defaultFor("clarity", "fuji-velvia")).toBe(6);
-    expect(defaultFor("clarity", null)).toBe(0);
+    expect(st.clarity).toBe(0);
+    expect(defaultFor("clarity")).toBe(0);
+    expect(defaultFor("filmStrength")).toBe(100);
   });
-  it("6) velvia 에서 clarity 20 → velvia 카드 다시 탭 → clarity 6 (히스토리에도 1단계)", () => {
+  it("6) 같은 필름 카드를 다시 탭해도 사용자가 조절한 값은 그대로 (히스토리 기록 없음)", () => {
     let h = initialHistory({ edit: resetForNewMedia(), choice: "auto" });
     h = historyReducer(h, { type: "do", action: { type: "selectFilm", simId: "fuji-velvia" } });
     h = historyReducer(h, { type: "do", action: { type: "set", key: "clarity", value: 20 } });
     h = historyReducer(h, { type: "do", action: { type: "selectFilm", simId: "fuji-velvia" } });
-    expect(h.present.edit.clarity).toBe(6);
-    expect(h.past.length).toBe(3);
+    expect(h.present.edit.clarity).toBe(20);
+    expect(h.past.length).toBe(2);
   });
   it("7) filmStrength 70, monoAmount 30 은 selectFilm 을 여러 번 해도 그대로", () => {
     let st: EditState = { ...resetForNewMedia(), filmStrength: 70, monoAmount: 30 };
     for (const id of ["fuji-acros", "ricoh-retro", null, "fuji-velvia", "fuji-velvia"]) st = selectFilm(st, id);
     expect([st.filmStrength, st.monoAmount]).toEqual([70, 30]);
   });
-  it("데모: resetForNewMedia() 다음 selectFilm('fuji-classic-chrome') 만", () => {
-    expect(mediaOpenState(true)).toEqual(selectFilm(resetForNewMedia(), "fuji-classic-chrome"));
+  it("모든 필름 32종 + 필름 없음: 선택해도 simId 외 편집 값이 변하지 않는다", () => {
+    const edited = editReducer(editReducer(resetForNewMedia(), { type: "set", key: "exposure", value: 1.5 }), { type: "toggleHdf" });
+    for (const id of [null, ...Object.keys(FILM_PRESETS)]) expect({ ...selectFilm(edited, id), simId: null }).toEqual({ ...edited, simId: null });
   });
-  it("눈금: simId ≠ null 이고 프리셋 ≠ NEUTRAL 인 키만", () => {
-    expect(presetTick("clarity", "fuji-velvia")).toBe(6);
-    expect(presetTick("exposure", "fuji-velvia")).toBeNull();
-    expect(presetTick("clarity", null)).toBeNull();
-    expect(presetTick("filmStrength", "fuji-velvia")).toBeNull();
-    for (const sp of SLIDERS) expect(presetTick(sp.key, null)).toBeNull();
+  it("데모: resetForNewMedia() 다음 selectFilm('fuji-classic-chrome') 만 (상세 조정은 초기값)", () => {
+    expect(mediaOpenState(true)).toEqual(selectFilm(resetForNewMedia(), "fuji-classic-chrome"));
+    expect({ ...mediaOpenState(true), simId: null }).toEqual(initialEditState());
   });
   it("setDRange 는 100/200/400 만", () => {
     expect(editReducer(resetForNewMedia(), { type: "setDRange", value: 400 }).dRange).toBe(400);
-    expect(getValue(selectFilm(resetForNewMedia(), "fuji-eterna"), "hdfStrength")).toBe(35);
+    expect(getValue(selectFilm(resetForNewMedia(), "fuji-eterna"), "hdfStrength")).toBe(100);
   });
 });
 

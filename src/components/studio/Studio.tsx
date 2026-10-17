@@ -11,7 +11,7 @@ import { isoFromSummary } from "@/lib/render/params";
 import { filmBadgeLabel } from "@/lib/export/frame";
 import { AUTO_LIGHT_LABEL, computeAutoLightMode, type AutoLightMode } from "@/lib/studio/auto-light";
 import { autoProfile, badgeText, type InputChoice } from "@/lib/studio/input-profile";
-import { editReducer, initialEditState, mediaOpenState, type EditAction, type SimInfo, type TabId } from "@/lib/studio/state";
+import { editReducer, initialEditState, isEditDefault, isTabDefault, mediaOpenState, RESET_ALL_LABEL, TAB_RESET_LABEL, type EditAction, type SimInfo, type TabId } from "@/lib/studio/state";
 import { AboutSheet } from "./AboutSheet";
 import { computeAutoChroma, computeAutoWb, solveEyedropperOutput } from "@/lib/studio/color-auto";
 import { HistoryTimelineSheet } from "./HistoryTimelineSheet";
@@ -26,6 +26,7 @@ import { ExifInspector } from "./ExifInspector";
 import { ExportModal } from "./ExportModal";
 import { ACCEPT_FALLBACK, Header } from "./Header";
 import { Preview } from "./Preview";
+import { TabResetBar } from "./TabResetBar";
 import { ProfileSheet } from "./ProfileSheet";
 import { StudioContext, type StudioCtx } from "./StudioContext";
 import { TabBar } from "./TabBar";
@@ -348,6 +349,19 @@ export default function Studio() {
     toast(`다시 실행: ${redoText}`, { duration: 1800 });
   }, [redoText, historyLocked, toast]);
 
+  // ── 탭 초기화 / 전체 초기화 (히스토리 1단계로 기록 → 되돌리기로 복구 가능) ──
+  const tabChanged = !isTabDefault(state, tab);
+  const resetCurrentTab = useCallback(() => {
+    if (historyLocked) return;
+    histDispatch({ type: "do", label: TAB_RESET_LABEL[tab], action: { type: "resetTab", tab } });
+    toast(TAB_RESET_LABEL[tab], { duration: 4000, actions: [{ label: "되돌리기", onClick: () => histDispatch({ type: "undo" }) }] });
+  }, [historyLocked, tab, toast]);
+  const resetAll = useCallback(() => {
+    if (historyLocked) return;
+    histDispatch({ type: "do", label: RESET_ALL_LABEL, action: { type: "resetAll" } });
+    toast(RESET_ALL_LABEL, { duration: 4000, actions: [{ label: "되돌리기", onClick: () => histDispatch({ type: "undo" }) }] });
+  }, [historyLocked, toast]);
+
   const [timelineOpen, setTimelineOpen] = useState(false);
   const timeline = useMemo(() => historyTimeline(hist), [hist]);
   const jumpTo = useCallback((index: number) => {
@@ -398,6 +412,7 @@ export default function Studio() {
           hasMedia={asset !== null} busy={loading !== null || exporting}
           p3Available={p3Ok} outSpace={outSpace} onOutSpace={changeOutSpace}
           undoLabel={undoText} redoLabel={redoText} undoDepth={hist.past.length} onUndo={undo} onRedo={redo}
+          resetAllEnabled={!isEditDefault(state)} onResetAll={resetAll}
           historyCount={timeline.length - 1} onTimeline={() => { if (!historyLocked) setTimelineOpen(true); }}
         />
         <AboutSheet open={aboutOpen} onClose={() => setAboutOpen(false)} />
@@ -423,6 +438,7 @@ export default function Studio() {
           </Preview>
           <div className="studio-side">
             <div className="studio-panel overflow-y-auto bg-[var(--panel)] px-4 py-2" style={{ touchAction: "pan-y" }}>
+              <TabResetBar tab={tab} changed={tabChanged} disabled={!asset || historyLocked} onReset={resetCurrentTab} />
               {tab === "film" ? <FilmTab /> : null}
               {tab === "light" ? <LightTab onAuto={runAuto} /> : null}
               {tab === "color" ? <ColorTab onAutoWb={runAutoWb} onAutoChroma={runAutoChroma} picking={picking} onTogglePick={() => setPicking((p) => !p)} /> : null}

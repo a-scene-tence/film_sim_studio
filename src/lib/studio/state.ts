@@ -135,16 +135,16 @@ export function presetOf(simId: string | null): FilmPreset {
 }
 
 /**
- * §6-3 필름 선택: PRESET_KEYS 의 모든 값을 FILM_PRESETS[id](null 이면 NEUTRAL_PRESET)로 통째로 교체한다.
- * 이전 필름의 값은 남지 않는다. filmStrength, monoHue, monoAmount(와 입력 색공간)는 바꾸지 않는다.
+ * 필름 선택: simId 만 교체한다. 노출·대비·커브·그레인 등 모든 상세 조정값은 사용자가 둔 값 그대로 유지한다.
+ * (FILM_PRESETS 는 레시피·Lab·테스트용 참고 수치이며 편집 상태로 복사하지 않는다)
  */
 export function selectFilm(state: EditState, id: string | null): EditState {
-  return { ...state, ...presetToState(presetOf(id)), simId: id };
+  return state.simId === id ? state : { ...state, simId: id };
 }
 
-/** §6-3 새 파일·데모를 열 때: 필름 없음 + NEUTRAL_PRESET, 필름 강도 100, 흑백 조색 0 (입력 색공간 Auto 는 히스토리 스냅샷이 담당) */
+/** 새 파일·데모를 열 때: 필름 없음 + 모든 값 기본 (입력 색공간 Auto 는 히스토리 스냅샷이 담당) */
 export function resetForNewMedia(): EditState {
-  return { ...selectFilm(initialEditState(), null), filmStrength: 100, monoHue: 0, monoAmount: 0 };
+  return initialEditState();
 }
 
 /** 데모 사진 전용 시작 필름 (필름 소개용) */
@@ -156,25 +156,9 @@ export function mediaOpenState(demo: boolean): EditState {
   return demo ? selectFilm(st, DEMO_SIM_ID) : st;
 }
 
-/** 프리셋이 정하는 슬라이더 키 (필름 강도·흑백 조색은 프리셋 밖) */
-const PRESET_SLIDER: ReadonlySet<SliderKey> = new Set<SliderKey>([
-  "lightBalance", "exposure", "brightness", "contrast", "highlights", "shadows", "whites", "blacks", "temp", "tint", "saturation", "vibrance",
-  "cce", "ccb", "clarity", "sharpness", "dehaze", "grainAmount", "grainSize", "vignette", "hdfStrength", "zone0", "zone1", "zone2", "zone3", "zone4",
-]);
-
-/** 더블탭 기본값: defaultFor(key) = (simId ? FILM_PRESETS[simId] : NEUTRAL_PRESET)[key], 프리셋 밖 키는 §6-2 표 기본값 */
-export function defaultFor(key: SliderKey, simId: string | null): number {
-  if (!PRESET_SLIDER.has(key)) return SLIDER_BY_KEY[key].def;
-  const ps = presetToState(presetOf(simId));
-  if (key.startsWith("zone")) return ps.curve.zones[Number(key.slice(4))]!;
-  return (ps as unknown as Record<string, number>)[key]!;
-}
-
-/** §6-4 트랙 눈금: simId ≠ null 이고 프리셋 값이 NEUTRAL_PRESET 과 다르면 그 값, 아니면 null */
-export function presetTick(key: SliderKey, simId: string | null): number | null {
-  if (simId === null) return null;
-  const v = defaultFor(key, simId);
-  return v !== defaultFor(key, null) ? v : null;
+/** 더블탭 기본값: 필름과 무관하게 §6-2 표 기본값 */
+export function defaultFor(key: SliderKey): number {
+  return SLIDER_BY_KEY[key].def;
 }
 
 export const D_RANGES: ReadonlyArray<DRange> = [100, 200, 400];
@@ -254,12 +238,14 @@ export type EditAction =
   | { type: "curvePreset"; preset: CurvePreset }
   | { type: "curveReset" }
   | { type: "patch"; values: Partial<Record<ParamKey, number>> }
-  | { type: "replace"; state: EditState };
+  | { type: "replace"; state: EditState }
+  | { type: "resetTab"; tab: TabId }
+  | { type: "resetAll" };
 
 export function editReducer(st: EditState, a: EditAction): EditState {
   switch (a.type) {
     case "set": return setValue(st, a.key, a.value);
-    case "reset": return setValue(st, a.key, defaultFor(a.key, st.simId));
+    case "reset": return setValue(st, a.key, defaultFor(a.key));
     case "selectFilm": return selectFilm(st, a.simId);
     case "setDRange": return { ...st, dRange: normalizeDRange(a.value) };
     case "toggleHdf": return { ...st, hdf: !st.hdf };
@@ -273,8 +259,39 @@ export function editReducer(st: EditState, a: EditAction): EditState {
       return n;
     }
     case "replace": return a.state;
+    case "resetTab": return resetTab(st, a.tab);
+    case "resetAll": return initialEditState();
   }
 }
 
 /** 곡선이 선형이고 구간이 모두 0 인가 (uCurveOn 의 반대) */
 export const isCurveIdentity = (c: EditCurve): boolean => !curveOn(toCurveState(c));
+
+// ── 탭별 초기화 / 전체 초기화 ──────────────────────────────────────────────
+/** 히스토리에 남기는 탭 초기화 라벨 */
+export const TAB_RESET_LABEL: Readonly<Record<TabId, string>> = {
+  film: "필름 탭 초기화", light: "라이트 탭 초기화", color: "컬러 탭 초기화", curve: "커브 탭 초기화", detail: "디테일 탭 초기화",
+};
+export const RESET_ALL_LABEL = "전체 초기화";
+
+/** 탭 초기화: 그 탭이 다루는 값만 initialEditState() 값으로 되돌린다. 다른 탭의 값은 그대로 */
+export function resetTab(st: EditState, tab: TabId): EditState {
+  const init = initialEditState();
+  const pick = (keys: ReadonlyArray<keyof EditState>): EditState => {
+    const out = { ...st } as Record<string, unknown>;
+    for (const k of keys) out[k] = init[k];
+    return out as unknown as EditState;
+  };
+  switch (tab) {
+    case "film": return pick(["simId", "filmStrength"]);
+    case "light": return pick(["dRange", "lightBalance", "exposure", "brightness", "contrast", "highlights", "shadows", "whites", "blacks"]);
+    case "color": return pick(["temp", "tint", "saturation", "vibrance", "monoHue", "monoAmount", "cce", "ccb"]);
+    case "curve": return pick(["curve"]);
+    case "detail": return pick(["sharpness", "clarity", "dehaze", "hdf", "hdfStrength", "grainAmount", "grainSize", "vignette"]);
+  }
+}
+
+/** 그 탭이 이미 기본값인가 (초기화 버튼 비활성 판정) */
+export const isTabDefault = (st: EditState, tab: TabId): boolean => JSON.stringify(resetTab(st, tab)) === JSON.stringify(st);
+/** 전체가 초기 상태와 같은가 */
+export const isEditDefault = (st: EditState): boolean => JSON.stringify(st) === JSON.stringify(initialEditState());
