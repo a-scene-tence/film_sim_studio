@@ -125,7 +125,7 @@ describe("T22 정적 라우팅 회귀 (check-export)", () => {
     const demo = Buffer.concat([Buffer.from([0xff, 0xd8]), Buffer.from("Exif\0\0FILM LAB"), Buffer.alloc(120000, 1)]);
     pub["demo/demo-scene.jpg"] = demo;
     for (const [k, v] of Object.entries(pub)) { put(p, join("public", k), v); put(p, join("out", k), v); }
-    if (opts.index) put(p, "out/index.html", "<html/>");
+    if (opts.index) put(p, "out/index.html", '<html><head><link rel="manifest" href="/manifest.webmanifest"/><meta name="apple-mobile-web-app-capable" content="yes"/><meta name="mobile-web-app-capable" content="yes"/><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/><meta name="viewport" content="viewport-fit=cover"/><link rel="apple-touch-icon" href="/i.png"/></head></html>');
     put(p, "out/lab/renderer.html", "<html/>");
     put(p, "out/404.html", "<html/>");
     put(p, "out/manifest.webmanifest", JSON.stringify({
