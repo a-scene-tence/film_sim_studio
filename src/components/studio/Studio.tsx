@@ -13,7 +13,7 @@ import { computeAutoLight } from "@/lib/studio/auto-light";
 import { autoProfile, badgeText, type InputChoice } from "@/lib/studio/input-profile";
 import { initialEditState, mediaOpenState, type EditAction, type SimInfo, type TabId } from "@/lib/studio/state";
 import { AboutSheet } from "./AboutSheet";
-import { computeAutoColor, solveEyedropper } from "@/lib/studio/color-auto";
+import { computeAutoColor, solveEyedropperOutput } from "@/lib/studio/color-auto";
 import { HistoryTimelineSheet } from "./HistoryTimelineSheet";
 import { historyReducer, historyTimeline, initialHistory, redoLabel, undoLabel } from "@/lib/studio/history";
 import { startThumbnails } from "@/lib/studio/thumbs";
@@ -66,6 +66,8 @@ export default function Studio() {
   const [exporting, setExporting] = useState(false);
   const [compare, setCompare] = useState(false);
   const [picking, setPicking] = useState(false);
+  const [pickMarker, setPickMarker] = useState<{ u: number; v: number; key: number } | null>(null);
+  const pickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [outSpace, setOutSpace] = useState<OutputSpace>("srgb");
   const [p3Ok, setP3Ok] = useState(false);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
@@ -296,8 +298,12 @@ export default function Studio() {
   const onPick = useCallback((u: number, v: number) => {
     if (!renderer || !asset) return;
     try {
-      const r = solveEyedropper(renderer.readAnalysisRgb(1024), u, v);
+      // 표본은 WB 적용 전(Pre-WB) 5×5 평균, 판정은 현재 필름·파라미터를 통과한 최종 출력 기준
+      const r = solveEyedropperOutput(renderer.readAnalysisRgb(1024), u, v, (sample) => renderer.wbOutputEval(sample, u, v));
       setPicking(false);
+      setPickMarker({ u, v, key: Date.now() });
+      if (pickTimer.current) clearTimeout(pickTimer.current);
+      pickTimer.current = setTimeout(() => setPickMarker(null), 1600);
       if (!r) { toast("선택한 지점이 너무 어두워 기준으로 쓸 수 없습니다. 더 밝은 흰색·회색 영역을 터치해 주세요."); return; }
       histDispatch({ type: "do", label: "WB 스포이트", action: { type: "patch", values: { temp: r.temp, tint: r.tint } } });
       toast(`WB 스포이트 적용 (색온도 ${r.temp}, 틴트 ${r.tint})`, { duration: 5000, actions: [{ label: "되돌리기", onClick: () => histDispatch({ type: "undo" }) }] });
@@ -383,7 +389,7 @@ export default function Studio() {
           <Preview
             canvasRef={canvasRef} renderer={renderer} asset={asset} hdf={state.hdf} onToggleHdf={() => dispatch({ type: "toggleHdf" })}
             compare={compare} onCompare={setCompare} editKey={editKey} disabled={!asset || loading !== null} pauseVideoSignal={pauseSignal}
-            picking={picking} onPick={onPick}
+            picking={picking} onPick={onPick} pickMarker={pickMarker}
           >
             {!asset && !loading ? <EmptyState busy={!renderer} onOpen={() => fileInput.current?.click()} onDemo={() => void openDemo()} onAbout={() => setAboutOpen(true)} /> : null}
             {loading ? (

@@ -316,15 +316,20 @@ export function snoise(vx: number, vy: number): number {
 }
 
 /** 섹션 5.15 n — px = 이미지 픽셀 중심 좌표 */
-export function grainNoise(pxX: number, pxY: number, scale: number, off: [number, number]): number {
+export function grainNoise(pxX: number, pxY: number, scale: number, off: [number, number], coarse = 0): number {
   const qx = pxX / scale + off[0], qy = pxY / scale + off[1];
-  return (0.72 * snoise(qx, qy) + 0.28 * snoise(qx * 2.03 + 17.13, qy * 2.03 + 41.71)) * (0.65 + 0.35 * snoise(qx * 0.37 + 3.7, qy * 0.37 + 9.1));
+  return (0.72 * snoise(qx, qy) + 0.28 * snoise(qx * 2.03 + 17.13, qy * 2.03 + 41.71) + 0.35 * coarse * snoise(qx * 0.5 + 29.3, qy * 0.5 + 5.9)) * (0.65 + 0.35 * snoise(qx * 0.37 + 3.7, qy * 0.37 + 9.1));
 }
+
+/** 그레인 최종 강도 계수 (구 0.07 의 약 2.93배) */
+export const GRAIN_GAIN = 0.205;
+/** 루미넌스 마스크 바닥값: 하이라이트·암부에서도 그레인이 이 비율 아래로 죽지 않는다 */
+export const GRAIN_FLOOR = 0.4
 
 export function grainApply(v: ArrayLike<number>, amount: number, n: number): Vec3 {
   const vl = dot(LUMA, v);
-  const resp = Math.sqrt(Math.max(4 * vl * (1 - vl), 0));
-  return map3(v, (x) => clamp01(x + 0.07 * (amount / 100) * resp * n));
+  const resp = GRAIN_FLOOR + (1 - GRAIN_FLOOR) * Math.sqrt(Math.max(4 * vl * (1 - vl), 0));
+  return map3(v, (x) => clamp01(x + GRAIN_GAIN * (amount / 100) * resp * n));
 }
 
 // ── S14 디더 ──────────────────────────────────────────────────────────────
@@ -358,7 +363,7 @@ export interface PixelCtx {
   curve: ArrayLike<number> | null;
   sat: number;
   vib: number;
-  grain: { amount: number; scale: number; off: [number, number] } | null;
+  grain: { amount: number; scale: number; off: [number, number]; coarse?: number } | null;
   /** Step 4: 필름 강도 0..1 (기본 1), 흑백 조색 uMonoTint (mono 일 때만 적용) */
   filmStrength?: number;
   monoTint?: [number, number];
@@ -368,7 +373,12 @@ export interface PixelCtx {
 
 /** v = 소스 텍셀, (u, vv) = 전역 uv, (pxX, pxY) = 이미지 픽셀 중심 좌표 */
 export function pixelPipeline(v: ArrayLike<number>, u: number, vv: number, pxX: number, pxY: number, c: PixelCtx): Vec3 {
-  let x = normalizePixel(v, c.norm);
+  return pixelPipelineFromWs(normalizePixel(v, c.norm), u, vv, pxX, pxY, c);
+}
+
+/** S0(소스→WS·WB·노출) 이후 픽셀 경로. x = 노출까지 적용된 WS 선형 RGB */
+export function pixelPipelineFromWs(x0: ArrayLike<number>, u: number, vv: number, pxX: number, pxY: number, c: PixelCtx): Vec3 {
+  let x: Vec3 = [x0[0]!, x0[1]!, x0[2]!];
   if (c.ct !== 0) x = contrastOp(x, c.ct);
   if (c.vig !== 0) { const f = vignetteF(u, vv, c.aspect, c.vig); x = map3(x, (q) => q * f); }
   x = clipNeg(x);
@@ -379,6 +389,6 @@ export function pixelPipeline(v: ArrayLike<number>, u: number, vv: number, pxX: 
   if (!c.mono && (c.ke > 0 || c.kb > 0)) o = cceOp(o, c.ke, c.kb);
   if (c.curve) o = applyCurve(o, c.curve);
   o = postChroma(o, c.sat, c.vib, 0, null, c.mono ? (c.monoTint ?? null) : null);
-  if (c.grain && c.grain.amount > 0) o = grainApply(o, c.grain.amount, grainNoise(pxX, pxY, c.grain.scale, c.grain.off));
+  if (c.grain && c.grain.amount > 0) o = grainApply(o, c.grain.amount, grainNoise(pxX, pxY, c.grain.scale, c.grain.off, c.grain.coarse ?? 0));
   return o;
 }

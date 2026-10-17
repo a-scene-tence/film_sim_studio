@@ -59,7 +59,7 @@ export interface ChainParams {
   curve: { on: boolean; tex: WebGLTexture };
   lut: LutUniforms;
   wsToSG3C: Float32Array;
-  grain: { scale: number; off: [number, number] };
+  grain: { scale: number; off: [number, number]; coarse: number };
   /** σ 는 R 픽셀 단위 (미리보기: D = diag(R)) */
   hdfPlan: HdfPlan;
   /** FSE-v2 카메라 ISP 유니폼 (isp.ts ispUniforms) */
@@ -473,7 +473,7 @@ export class RenderGraph {
     this.draw({
       pass: "final", target, size,
       v2: { uDstSize: [size.width, size.height], uGrainOff: c.grain.off, uCropOrigin: o.crop, uImgPxOrigin: o.imgPxOrigin, uTileOrigin: [0, 0], uImageSize: [size.width, size.height] },
-      f: { uSharpen: c.s.uSharpen, uIspEs: c.isp.uIspEs, uGrainAmt: c.s.uGrainAmt, uGrainScale: c.grain.scale },
+      f: { uSharpen: c.s.uSharpen, uIspEs: c.isp.uIspEs, uGrainAmt: c.s.uGrainAmt, uGrainScale: c.grain.scale, uGrainCoarse: c.grain.coarse },
       i: { uDither: o.dither, uFlipY: o.flipY, uOutConv: target === null && this.outputSpace === "display-p3" },
       m3: { uOutM: srgbToP3Uniform() },
       tex: { uPost: post, uBlurL: blurL },

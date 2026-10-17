@@ -72,7 +72,7 @@ describe("U12 리듀서 골든 (6-7)", () => {
   it("2) selectFilm('fuji-classic-chrome') → 프리셋 그대로", () => {
     const st = selectFilm(resetForNewMedia(), "fuji-classic-chrome");
     expectMatches(st, FILM_PRESETS["fuji-classic-chrome"]!);
-    expect([st.contrast, st.cce, st.grainAmount, st.vignette, st.dRange]).toEqual([12, 2, 20, -8, 200]);
+    expect([st.contrast, st.cce, st.grainAmount, st.vignette, st.dRange]).toEqual([12, 2, 35, -8, 200]);
   });
   it("3) clarity 40, grainAmount 0 으로 바꾼 뒤 velvia → velvia 와 같음", () => {
     let st = selectFilm(resetForNewMedia(), "fuji-classic-chrome");

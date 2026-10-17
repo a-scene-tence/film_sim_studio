@@ -7,6 +7,7 @@ uniform float uIspEs;        // optical edge softening = brand ISP es x film str
 uniform float uGrainAmt;     // 0..100
 uniform float uGrainScale;   // px per noise unit
 uniform vec2 uGrainOff;
+uniform float uGrainCoarse; // 0..1 : 큰 입자 옥타브 가중치 (그레인 크기 슬라이더에서 유도)
 uniform bool uDither;
 uniform bool uFlipY;         // true only when writing to the default framebuffer
 uniform vec2 uCropOrigin;    // texel offset of the written region inside uPost (tile padding)
@@ -62,10 +63,10 @@ void main() {
   vec2 px = uImgPxOrigin + vec2(o) + 0.5;
   if (uGrainAmt > 0.0) {
     vec2 q = px / uGrainScale + uGrainOff;
-    float n = (0.72 * snoise(q) + 0.28 * snoise(q * 2.03 + vec2(17.13, 41.71))) * (0.65 + 0.35 * snoise(q * 0.37 + vec2(3.7, 9.1)));
+    float n = (0.72 * snoise(q) + 0.28 * snoise(q * 2.03 + vec2(17.13, 41.71)) + 0.35 * uGrainCoarse * snoise(q * 0.5 + vec2(29.3, 5.9))) * (0.65 + 0.35 * snoise(q * 0.37 + vec2(3.7, 9.1)));
     float vl = dot(LUMA, v);
-    float resp = sqrt(max(4.0 * vl * (1.0 - vl), 0.0));
-    v = clamp(v + 0.07 * (uGrainAmt / 100.0) * resp * n, 0.0, 1.0);
+    float resp = 0.4 + 0.6 * sqrt(max(4.0 * vl * (1.0 - vl), 0.0));
+    v = clamp(v + 0.205 * (uGrainAmt / 100.0) * resp * n, 0.0, 1.0);
   }
   if (uOutConv) v = srgbEnc(clamp(uOutM * srgbDec(v), 0.0, 1.0));
   if (uDither) {

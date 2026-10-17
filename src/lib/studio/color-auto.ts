@@ -73,6 +73,49 @@ export function solveEyedropper(g: RgbaGrid, u: number, v: number): { temp: numb
   return s ? { temp: s.temp, tint: s.tint, sample } : null;
 }
 
+/** (temp, tint) → 필름·ISP·톤 커브 등 S0 이후 전체 픽셀 경로를 통과한 최종 표시 RGB(sRGB 인코딩, 0..1) */
+export type OutputEval = (temp: number, tint: number) => ArrayLike<number>;
+
+/** 최종 출력 무채색 오차: 표시 RGB 채널 차이의 제곱합 */
+export function outputNeutralError(rgb: ArrayLike<number>): number {
+  return (rgb[0]! - rgb[1]!) ** 2 + (rgb[2]! - rgb[1]!) ** 2;
+}
+
+/**
+ * 최종 렌더링 RGB 가 R=G=B 가 되는 (temp, tint) ∈ [−100,100]² 정수 탐색.
+ * 격자 10 → (best ± 9, 3) → (best ± 3, 1) 의 다단계 좌표 격자 탐색. 동률이면 |temp|+|tint| 가 작은 쪽.
+ * 필름 LUT 가 중성을 틴트해도 그 틴트까지 상쇄하는 값을 찾는다. 출력이 거의 검정/백이면 오차가 0 이어도 (0,0) 이 선택된다.
+ */
+export function solveNeutralOutput(evalOut: OutputEval): { temp: number; tint: number; error: number; out: Rgb } {
+  const run = (t: number, k: number) => { const o = evalOut(t, k); return { e: outputNeutralError(o), o: [o[0]!, o[1]!, o[2]!] as Rgb }; };
+  const z = run(0, 0);
+  let best = { t: 0, k: 0, e: z.e, o: z.o };
+  const consider = (t: number, k: number) => {
+    const tt = clamp(t, -100, 100), kk = clamp(k, -100, 100);
+    const r = run(tt, kk);
+    if (r.e < best.e - 1e-12 || (Math.abs(r.e - best.e) <= 1e-12 && Math.abs(tt) + Math.abs(kk) < Math.abs(best.t) + Math.abs(best.k))) best = { t: tt, k: kk, e: r.e, o: r.o };
+  };
+  for (let t = -100; t <= 100; t += 10) for (let k = -100; k <= 100; k += 10) consider(t, k);
+  for (const [step, span] of [[3, 9], [1, 3]] as const) {
+    const c = { ...best };
+    for (let t = c.t - span; t <= c.t + span; t += step) for (let k = c.k - span; k <= c.k + span; k += step) consider(t, k);
+  }
+  return { temp: nz(normalizeValue("temp", best.t)), tint: nz(normalizeValue("tint", best.k)), error: best.e, out: best.o };
+}
+
+/**
+ * 스포이트(최종 출력 기준): (u,v) 주변 5×5 Pre-WB 평균 표본이 현재 필름·파라미터를 통과한 뒤 R=G=B 가 되도록 하는 temp·tint.
+ * makeEval(sample) 은 표본(WB 적용 전 WS 선형 RGB)을 최종 표시 RGB 로 보내는 함수를 만든다. 표본이 없거나 너무 어두우면 null.
+ */
+export function solveEyedropperOutput(
+  g: RgbaGrid, u: number, v: number, makeEval: (sample: Rgb) => OutputEval,
+): { temp: number; tint: number; sample: Rgb; out: Rgb } | null {
+  const sample = sampleWindowMean(g, u, v);
+  if (!sample || !(Math.max(sample[0], sample[1], sample[2]) > EPS)) return null;
+  const r = solveNeutralOutput(makeEval(sample));
+  return { temp: r.temp, tint: r.tint, sample, out: r.out };
+}
+
 // ── 컬러 자동 보정 ACA-v1 ──────────────────────────────────────────────────
 /** 클리핑·너무 어두운 픽셀 제외 기준 (선형 RGB) */
 export const ACA_MIN = 0.01;
