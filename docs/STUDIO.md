@@ -39,7 +39,7 @@ Step 3 톤 커브 프리셋 키는 지시서의 표기와 달라 실제 키를 �
 | brightness · contrast · highlights · shadows · whites · blacks | 라이트 | 밝기·대비·하이라이트·쉐도우·흰색·검정 | −100 | 100 | 1 | 0 | 부호 정수 | uBr·uCt·uHi·uSh·uWh·uBk = v/100 |
 | temp · tint | 컬러 | 색온도·틴트 | −100 | 100 | 1 | 0 | 부호 정수 | uWB = wbMatrix(temp, tint) |
 | saturation · vibrance | 컬러 | 채도·생동감 | −100 | 100 | 1 | 0 | 부호 정수 | uSat·uVib = v |
-| cce · ccb | 컬러 | 컬러 크롬 이펙트·블루 | 0 | 2 | 1 | 0 | 끔/약/강 | uKe = uKb = [0, 0.5, 1][v] |
+| cce · ccb | 컬러 | 컬러 크롬 이펙트·블루 | 0 | 2 | 1 | 0 | 끔/약/강 | uKe = [0, 0.075, 0.145][v], uKb = [0, 0.065, 0.13][v] (OPT-v1 농도 계수, COLOR_SCIENCE §10) |
 | monoHue · monoAmount | 컬러 | 흑백 조색 색상·강도 | 0 / 0 | 359 / 100 | 1 | 0 | 40° / 정수 | uMonoTint (COLOR_SCIENCE §16.5) |
 | sharpness | 디테일 | 선명도 | 0 | 150 | 1 | 0 | 정수 | uSharpen = v |
 | clarity · dehaze | 디테일 | 명료도·디헤이즈 | −100 | 100 | 1 | 0 | 부호 정수 | uClarity·uDehaze = v |

@@ -118,6 +118,10 @@ export function normalizePixel(v: ArrayLike<number>, c: NormalizeCtx): Vec3 {
 }
 
 // ── S2~S6 ──────────────────────────────────────────────────────────────────
+const softplus = (t: number) => Math.max(t, 0) + Math.log(1 + Math.exp(-Math.abs(t)));
+/** OPT-v1 디헤이즈 소프트 토: 0.004·softplus(J/0.004) */
+export const softToe = (J: number) => 0.004 * softplus(J / 0.004);
+
 /** 섹션 5.7 디헤이즈 적용 */
 export function dehazeApply(x: ArrayLike<number>, D: number, A: ArrayLike<number>, t: number): Vec3 {
   if (D === 0) return [x[0]!, x[1]!, x[2]!];
@@ -126,6 +130,8 @@ export function dehazeApply(x: ArrayLike<number>, D: number, A: ArrayLike<number
     const k = D / 100;
     const te = 1 + (Math.max(t, 0.1) - 1) * k;
     J = [(x[0]! - A[0]!) / te + A[0]!, (x[1]! - A[1]!) / te + A[1]!, (x[2]! - A[2]!) / te + A[2]!];
+    // OPT-v1: 하드 클립 대신 소프트 토(softplus, 폭 0.004) — 암부 계조가 0 에서 뭉개지지 않는다
+    return map3(J, softToe);
   } else {
     const k = -D / 100;
     J = [x[0]! + (A[0]! - x[0]!) * 0.4 * k, x[1]! + (A[1]! - x[1]!) * 0.4 * k, x[2]! + (A[2]! - x[2]!) * 0.4 * k];
@@ -148,18 +154,23 @@ export function baseTone(x: ArrayLike<number>, ab: [number, number], s: ToneSlid
   const mwh = sstep(1.5, 3.8, e);
   const mbk = 1 - sstep(-7, -3, e);
   const mmid = Math.exp(-0.5 * sq(e / 1.8));
+  // OPT-v1 존 분리: 쉐도우 리프트는 Zone 0~I 블랙 코어(e < −4)를, 쉐도우 전체는 중간톤(e > −1)을 고정, 하이라이트 복원은 넓은 숄더 마스크(기울기 ≥ 0.5)
+  const msh2 = msh * (s.sh > 0 ? sstep(-7, -4, e) : 1) * (1 - sstep(-3.5, 1.5, e));
+  const mhi2 = s.hi < 0 ? sstep(-1, 3.5, e) : mhi;
   const z = zoneShadowPop(Bs, Dt, isp.sd, isp.pop);
-  const dB = 1.5 * s.sh * msh + 1.5 * s.hi * mhi + s.wh * mwh + s.bk * mbk + s.br * mmid + 1.2 * s.lb * (msh - mhi) + z.dB;
-  const Yp = Math.pow(2, Bs + dB + z.Dt);
+  const dB = 1.5 * s.sh * msh2 + 1.5 * s.hi * mhi2 + s.wh * mwh + s.bk * mbk + s.br * mmid + 1.2 * s.lb * (msh - mhi) + z.dB;
+  // 압축된 존의 국소 대비 복원 (Flat HDR 방지)
+  const dg = 1 + 0.25 * (Math.max(s.sh, 0) * msh2 + Math.max(-s.hi, 0) * mhi2);
+  const Yp = Math.pow(2, Bs + dB + z.Dt * dg);
   return map3(x, (v) => v * (Yp / Y));
 }
 
-/** 섹션 5.8 대비 (uCt ∈ [−1,1]) */
+/** 섹션 5.8 대비 (uCt ∈ [−1,1]). OPT-v1 시그모이드: e' = e + 0.5·ct·e·exp(−0.5(e/2.5)²) — 중회색 기울기 1+0.5ct, 토·숄더는 원래 값으로 감긴다 */
 export function contrastOp(x: ArrayLike<number>, ct: number): Vec3 {
   const Y = dot(LUMA, x);
   if (Y <= 2 ** -20) return [x[0]!, x[1]!, x[2]!];
   const e = Math.log2(Y) - Math.log2(0.18);
-  const Yp = 0.18 * Math.pow(2, e * (1 + 0.5 * ct));
+  const Yp = 0.18 * Math.pow(2, e + 0.5 * ct * e * Math.exp(-0.5 * sq(e / 2.5)));
   return map3(x, (v) => v * (Yp / Y));
 }
 
@@ -233,24 +244,35 @@ export function gamutMap16(L0: number, a: number, b: number): Vec3 {
 // ── S8~S12 ─────────────────────────────────────────────────────────────────
 const toLab = (v: ArrayLike<number>) => linToOklab(map3(v, srgbDec));
 
-/** 섹션 5.11 컬러 크롬 이펙트 / FX 블루 (COLOR_SCIENCE §10, lib_ops.ts cceOp 와 동일 수식) */
+/** 섹션 5.11 컬러 크롬 이펙트 / FX 블루 (COLOR_SCIENCE §10 OPT-v1, lib_ops.ts cceOp 와 동일 수식). ke, kb = 농도 계수 (KE_LEVELS, KB_LEVELS) */
 export function cceOp(v: ArrayLike<number>, ke: number, kb: number): Vec3 {
-  const [L, a, b] = toLab(v);
+  const y = map3(v, (q) => srgbDec(clamp01(q)));
+  const [L, a, b] = linToOklab(y);
   const C = Math.hypot(a, b);
   const h = Math.atan2(b, a) / DEG;
   const hd = h < 0 ? h + 360 : h;
-  const [r, g, bl] = [clamp01(v[0]!), clamp01(v[1]!), clamp01(v[2]!)];
-  const mx = Math.max(r, g, bl);
-  const S = (mx - Math.min(r, g, bl)) / Math.max(mx, 1e-4);
-  const hueB = sstep(176, 190, hd) * (1 - sstep(270, 284, hd));
-  const rgbB = sstep(0, 0.04, bl - 1.15 * r) * sstep(0, 0.04, bl - 0.85 * g);
-  const blueW = hueB * rgbB;
-  const skin = sstep(25, 38, hd) * (1 - sstep(68, 82, hd)) * (1 - sstep(0.5, 0.65, S)) * sstep(0.35, 0.5, L);
-  const me = sstep(0.18, 0.45, S) * (1 - blueW) * (1 - 0.5 * skin) * sstep(0.18, 0.25, L) * (1 - sstep(0.92, 0.98, L));
-  const mb = blueW * sstep(0.012, 0.045, C) * sstep(0.15, 0.3, L);
-  const L2 = L * (1 - 0.27 * ke * me - 0.34 * kb * mb);
-  const cs = 1 + 0.22 * ke * me + 0.36 * kb * mb;
-  return map3(gamutMap16(L2, a * cs, b * cs), srgbEnc);
+  const mx = Math.max(y[0], y[1], y[2]);
+  const sat = (mx - Math.min(y[0], y[1], y[2])) / (mx + 0.05);
+  const Y = dot(LUMA, y);
+  const wTop = 1 - 0.3 * sstep(0.85, 1.05, Y);
+  const wLum = sstep(0.06, 0.3, Y) * wTop;
+  const dh = hd - 240;
+  const wHueB = Math.abs(dh) < 60 ? 0.5 * (1 + Math.cos((Math.PI * dh) / 60)) : 0;
+  const wSkin = Math.exp(-0.5 * sq(wrap180(hd - 55) / 20)) * (1 - sstep(0.55, 0.85, sat));
+  const we = ke * sstep(0.25, 0.85, sat) * wLum * (1 - 0.7 * wSkin);
+  const mb = wHueB * sstep(0.14, 0.72, sat) * sstep(0.02, 0.15, Y) * wTop;
+  let pe = 1;
+  if (we > 0 && C > 1e-6) {
+    // Beer-Lambert 감산 농도: 채널마다 광학 농도 −ln(c) 에 비례해 흡수 → 색 밀도(C/L) 상승분 ρ 를 측정해 +0.4·ke 로 부드럽게 제한
+    const [Lb, ab, bb] = linToOklab(map3(y, (q) => Math.pow(Math.max(q, 1e-5), 1 + we)));
+    const rho = (Math.hypot(ab, bb) * L) / (Math.max(Lb, 1e-6) * C) - 1;
+    const kap = 0.4 * ke;
+    pe = 1 + kap * Math.tanh(rho / kap);
+  }
+  // 겹친 흡수층의 투과율은 곱해진다 (Beer-Lambert): CCE 와 CPL 이 같은 픽셀에 걸려도 색상 경계에 계단이 생기지 않는다
+  const fL = (1 - we) * (1 - kb * mb);
+  const cs = fL * pe * (1 + (kb / 1.3) * mb);
+  return map3(gamutMap16(L * fL, a * cs, b * cs), srgbEnc);
 }
 
 /** 섹션 5.12 채널별 커브 */
@@ -277,19 +299,27 @@ export function postChroma(v: ArrayLike<number>, sat: number, vib: number, clari
     const g = vib >= 0 ? 1 + (vib / 100) * (1 - sstep(0, 0.2, C)) * (1 - 0.5 * skin) : 1 + (vib / 100) * (1 - 0.5 * sstep(0, 0.2, C));
     const C2 = Math.max(0, C1 * g);
     if (C > 1e-9) { a *= C2 / C; b *= C2 / C; } else { a = 0; b = 0; }
+    // OPT-v1 Helmholtz–Kohlrausch 광학 농도: 늘어난 크로마 비율만큼 명도를 최대 6% 낮춘다
+    if (C2 > C) L *= 1 - 0.06 * (1 - C / C2) * sstep(0, 0.15, C2);
   }
   if (clar && clarAB) L = clarityL(L, clarAB[0] * L + clarAB[1], clarity);
   return map3(gamutMap16(L, a, b), srgbEnc);
 }
 
-/** 섹션 5.13 L' = L + 1.2(Cl/100)(L−base)·4L(1−L) */
-export const clarityL = (L: number, base: number, Cl: number) => L + 1.2 * (Cl / 100) * (L - base) * 4 * L * (1 - L);
+/** 섹션 5.13 OPT-v1: L' = L + 1.2(Cl/100)·0.08·tanh((L−base)/0.08)·4L(1−L)·sstep(0.02,0.16,L)·(1 − 0.5·sstep(0.85,1,L)) */
+export const clarityL = (L: number, base: number, Cl: number) =>
+  L + 1.2 * (Cl / 100) * 0.08 * Math.tanh((L - base) / 0.08) * 4 * L * (1 - L) * sstep(0.02, 0.16, L) * (1 - 0.5 * sstep(0.85, 1, L));
 
-/** 섹션 5.14 L' = L + (Sh/100)·1.2·D', D' = sign(D)·max(|D|−0.004, 0). FSE-v2 §5-5: − es·sstep(0.012, 0.045, |D|)·D */
+/**
+ * 섹션 5.14 L' = L + (Sh/100)·1.2·wT·κ·tanh(D'/κ), D' = sign(D)·max(|D|−0.004, 0), κ = 0.035 (D' > 0, 흰 오버슈트) / 0.05 (D' < 0),
+ * wT = sstep(0.02, 0.15, L)·(1 − 0.6·sstep(0.85, 1, L)) (OPT-v1 할로 억제). FSE-v2 §5-5: − es·sstep(0.012, 0.045, |D|)·D
+ */
 export function sharpenL(L: number, blur: number, Sh: number, es = 0): number {
   const D = L - blur;
   const Dp = Math.sign(D) * Math.max(Math.abs(D) - 0.004, 0);
-  return edgeSoftenL(L + (Sh / 100) * 1.2 * Dp, D, es);
+  const k = Dp > 0 ? 0.035 : 0.05;
+  const wT = sstep(0.02, 0.15, L) * (1 - 0.6 * sstep(0.85, 1, L));
+  return edgeSoftenL(L + (Sh / 100) * 1.2 * wT * k * Math.tanh(Dp / k), D, es);
 }
 
 // ── S13 그레인 (픽셀 격자 삼각 PDF 백색 노이즈 + 짧은 커널, docs/COLOR_SCIENCE.md §16.13) ──
