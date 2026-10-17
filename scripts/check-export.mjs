@@ -36,6 +36,11 @@ if (exists('manifest.webmanifest')) {
   for (const src of ['/icons/icon-192.png', '/icons/icon-512.png', '/icons/icon-maskable-512.png']) if (!icons.some((i) => i.src === src)) errors.push('manifest icon missing: ' + src);
   if (!icons.some((i) => i.purpose === 'maskable')) errors.push('manifest has no maskable icon');
 }
+// 6b) standalone PWA 메타 태그 (index.html)
+if (exists('index.html')) {
+  const h = fs.readFileSync(path.join(OUT, 'index.html'), 'utf8');
+  for (const t of ['rel="manifest"', 'name="apple-mobile-web-app-capable" content="yes"', 'name="mobile-web-app-capable" content="yes"', 'name="apple-mobile-web-app-status-bar-style" content="black-translucent"', 'viewport-fit=cover', 'rel="apple-touch-icon"']) if (!h.includes(t)) errors.push('index.html missing ' + t);
+}
 // 7) sw.js 프리캐시 목록
 if (exists('sw.js')) {
   const code = fs.readFileSync(path.join(OUT, 'sw.js'), 'utf8');
