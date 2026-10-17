@@ -3,13 +3,13 @@ import { effectiveParams, scalarUniforms, ZERO_ADJUST, type Level, type RenderPa
 import { toCurveState, type EditState } from "./state";
 
 export interface BuildOptions {
-  /** EXIF ISO (acros 그레인 규칙은 selectSim 에서 이미 슬라이더에 반영되므로 렌더에는 영향 없음) */
+  /** EXIF ISO (렌더에는 영향 없음, Step 3 호환) */
   iso?: number | null;
   sourceLutId?: string | null;
   lookLutId?: string | null;
 }
 
-/** 스튜디오는 절대 모드: 슬라이더 값이 곧 실효값이다 (레시피는 selectSim 이 슬라이더에 복사) */
+/** 스튜디오는 절대 모드: 슬라이더 값이 곧 실효값이다 (필름 프리셋은 selectFilm 이 슬라이더에 통째로 복사) */
 export function buildRenderParams(st: EditState, o: BuildOptions = {}): RenderParams {
   return {
     sim: st.simId ?? "none",
@@ -32,7 +32,7 @@ export function buildRenderParams(st: EditState, o: BuildOptions = {}): RenderPa
     hdfStrength: st.hdfStrength,
     monoHue: st.monoHue,
     monoAmount: st.monoAmount,
-    dRange: 100,
+    dRange: st.dRange,
     absolute: true,
   };
 }

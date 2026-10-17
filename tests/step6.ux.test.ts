@@ -134,7 +134,7 @@ describe("Undo/Redo 히스토리 (트랜잭션 단위, 최대 50단계)", () => 
     expect(h.present.edit.hdf).toBe(true);
     h = run(h, { type: "do", action: { type: "setHdf", value: true } });
     expect(h.past.length).toBe(1);
-    h = run(h, { type: "do", action: { type: "selectSim", simId: "fuji-classic-chrome", iso: null } }, { type: "do", action: { type: "choice", choice: "slog3" } });
+    h = run(h, { type: "do", action: { type: "selectFilm", simId: "fuji-classic-chrome" } }, { type: "do", action: { type: "choice", choice: "slog3" } });
     expect(h.past.length).toBe(3);
     expect(h.present.choice).toBe("slog3");
     h = run(h, { type: "undo" }, { type: "undo" });
@@ -173,7 +173,7 @@ describe("Undo/Redo 히스토리 (트랜잭션 단위, 최대 50단계)", () => 
     expect(redoLabel(h)).toBe("노출");
     h = run(h, { type: "do", action: { type: "patch", values: { exposure: 1, contrast: 5 } } });
     expect(undoLabel(h)).toBe("노출 외 1개");
-    h = run(h, { type: "do", action: { type: "selectSim", simId: "fuji-classic-chrome", iso: null } });
+    h = run(h, { type: "do", action: { type: "selectFilm", simId: "fuji-classic-chrome" } });
     expect(undoLabel(h)).toBe("필름 변경");
     expect(diffLabel(h.present, h.present)).toBe("변경");
   });
@@ -203,10 +203,10 @@ describe("Smart Clean History: 실질 변화 없는 조작은 기록하지 않�
   });
 
   it("동일 필름 재선택·HDF 동일 값 설정은 기록하지 않고 실제 변경만 기록한다", () => {
-    let h = run(start(), { type: "do", action: { type: "selectSim", simId: null, iso: null } }, { type: "do", action: { type: "setHdf", value: false } });
+    let h = run(start(), { type: "do", action: { type: "selectFilm", simId: null } }, { type: "do", action: { type: "setHdf", value: false } });
     expect(h.past.length).toBe(0);
-    h = run(h, { type: "do", action: { type: "selectSim", simId: "fuji-classic-chrome", iso: null } });
-    h = run(h, { type: "do", action: { type: "selectSim", simId: "fuji-classic-chrome", iso: null } });
+    h = run(h, { type: "do", action: { type: "selectFilm", simId: "fuji-classic-chrome" } });
+    h = run(h, { type: "do", action: { type: "selectFilm", simId: "fuji-classic-chrome" } });
     expect(h.past.length).toBe(1);
   });
 
@@ -221,7 +221,7 @@ describe("히스토리 타임라인 점프 (jumpToHistoryIndex)", () => {
   const start = () => initialHistory({ edit: initialEditState(), choice: "auto" });
   const run = (h: HistoryState, ...as: HistoryAction[]) => as.reduce(historyReducer, h);
   const commitExposure = (v: number): HistoryAction[] => [{ type: "begin" }, { type: "live", action: { type: "set", key: "exposure", value: v } }, { type: "commit" }];
-  const build = () => run(start(), ...commitExposure(0.5), { type: "do", action: { type: "selectSim", simId: "fuji-classic-chrome", iso: null } }, ...commitExposure(1));
+  const build = () => run(start(), ...commitExposure(0.5), { type: "do", action: { type: "selectFilm", simId: "fuji-classic-chrome" } }, ...commitExposure(1));
 
   it("과거 시점으로 점프하면 그 이후가 redo 로 남는다", () => {
     const h = jumpToHistoryIndex(build(), 1);

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { FILM_SIMS } from "../src/lib/color/fse/film-params.mjs";
 import { historyReducer, historyTimeline, initialHistory, type HistoryState } from "../src/lib/studio/history";
-import { DEMO_SIM_ID, getValue, initialEditState, mediaOpenState, selectSim, SLIDERS } from "../src/lib/studio/state";
+import { DEMO_SIM_ID, getValue, initialEditState, mediaOpenState, selectFilm, SLIDERS } from "../src/lib/studio/state";
 
 describe("새 미디어 열기 = 완전 초기화", () => {
   it("사용자 파일: 필름 없음, 필름 강도 100%, 모든 슬라이더 기본값, HDF 끔, 톤 커브 linear", () => {
@@ -16,12 +16,13 @@ describe("새 미디어 열기 = 완전 초기화", () => {
     expect(st.curve.zones).toEqual([0, 0, 0, 0, 0]);
     for (const sp of SLIDERS) expect([sp.key, getValue(st, sp.key)]).toEqual([sp.key, sp.def]);
   });
-  it("데모만 소개용 필름 + HDF 로 시작", () => {
-    expect(mediaOpenState(true)).toEqual({ ...initialEditState(), simId: DEMO_SIM_ID, hdf: true });
+  it("데모는 resetForNewMedia() 다음 selectFilm('fuji-classic-chrome') 만 (HDF 강제 없음, FSE-v2 §6-3)", () => {
+    expect(mediaOpenState(true)).toEqual(selectFilm(initialEditState(), DEMO_SIM_ID));
+    expect(mediaOpenState(true).hdf).toBe(false);
   });
   it("편집 이력이 쌓인 뒤 새 미디어 → 히스토리는 '초기 상태' 1개", () => {
     let h: HistoryState = initialHistory({ edit: initialEditState(), choice: "auto" });
-    h = historyReducer(h, { type: "do", action: { type: "selectSim", simId: "fuji-velvia", iso: null } });
+    h = historyReducer(h, { type: "do", action: { type: "selectFilm", simId: "fuji-velvia" } });
     h = historyReducer(h, { type: "do", action: { type: "set", key: "exposure", value: 1 } });
     h = historyReducer(h, { type: "do", action: { type: "toggleHdf" } });
     h = historyReducer(h, { type: "do", action: { type: "choice", choice: "slog3" } });
@@ -48,7 +49,8 @@ describe("새 미디어 열기 = 완전 초기화", () => {
     const preview = readFileSync(new URL("../src/components/studio/Preview.tsx", import.meta.url), "utf8");
     expect(preview).toContain("useEffect(() => { zoomRef.current = ONE; queueMicrotask(() => setZoom(ONE)); }, [assetId]);");
   });
-  it("필름을 골라도 상세 조정 슬라이더는 중립 그대로", () => {
-    for (const P of FILM_SIMS) expect({ ...selectSim(initialEditState(), P.id, 6400), simId: null }).toEqual(initialEditState());
+  it("FSE-v2: 필름 선택은 그 필름의 프리셋 값으로 슬라이더를 채운다 (이전 '중립 고정' 동작 대체)", () => {
+    for (const P of FILM_SIMS) expect(selectFilm(initialEditState(), P.id).simId).toBe(P.id);
+    expect(selectFilm(initialEditState(), "fuji-classic-chrome").contrast).toBe(12);
   });
 });

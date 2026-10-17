@@ -2,7 +2,7 @@
 import type { MediaAsset, PixelBufferF32 } from "../media-loader";
 import { FilmRenderer } from "../render/renderer";
 import { buildRenderParams } from "./uniforms";
-import { selectSim, type EditState } from "./state";
+import { selectFilm, type EditState } from "./state";
 
 /** 박스 평균 다운샘플 (긴 변 = long). 이미 작으면 그대로 */
 export function downscaleProxy(p: PixelBufferF32, long: number): PixelBufferF32 {
@@ -53,7 +53,7 @@ export function startThumbnails(job: ThumbJob): () => void {
       for (const id of job.simIds) {
         await new Promise<void>((r) => setTimeout(r, 0));
         if (cancelled || !c2) return;
-        const st = { ...selectSim(job.base, id, job.iso), filmStrength: 100 };
+        const st = { ...selectFilm(job.base, id), filmStrength: 100 };
         renderer.setParams(buildRenderParams(st, { iso: job.iso }));
         await renderer.whenReady();
         if (cancelled) return;

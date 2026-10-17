@@ -1,17 +1,18 @@
 "use client";
 import { TrackSlider } from "@/components/editor/Slider";
-import { defaultFor, formatValue, getValue, SLIDER_BY_KEY, type SliderKey } from "@/lib/studio/state";
+import { defaultFor, formatValue, getValue, presetTick, SLIDER_BY_KEY, type SliderKey } from "@/lib/studio/state";
 import { useStudio } from "../StudioContext";
 
 /** SLIDERS 표(SSOT)에서 라벨·범위·표시·기본값을 읽는 슬라이더 행 */
 export function StateSlider({ k, disabled, track }: { k: SliderKey; disabled?: boolean; track?: string }) {
-  const { state, dispatch, live, beginEdit, commitEdit, iso } = useStudio();
+  const { state, dispatch, live, beginEdit, commitEdit } = useStudio();
   const sp = SLIDER_BY_KEY[k];
   const v = getValue(state, k);
+  const tick = presetTick(k, state.simId);
   return (
     <TrackSlider
-      label={sp.label} value={v} min={sp.min} max={sp.max} step={sp.step} display={formatValue(k, v)} defaultValue={defaultFor(k, state.simId, iso)}
-      disabled={disabled} trackBackground={track} onChange={(x) => live({ type: "set", key: k, value: x })} onDragStart={beginEdit} onCommit={commitEdit} onReset={() => dispatch({ type: "reset", key: k, iso })}
+      label={sp.label} value={v} min={sp.min} max={sp.max} step={sp.step} display={formatValue(k, v)} defaultValue={defaultFor(k, state.simId)} tick={tick ?? undefined}
+      disabled={disabled} trackBackground={track} onChange={(x) => live({ type: "set", key: k, value: x })} onDragStart={beginEdit} onCommit={commitEdit} onReset={() => dispatch({ type: "reset", key: k })}
     />
   );
 }

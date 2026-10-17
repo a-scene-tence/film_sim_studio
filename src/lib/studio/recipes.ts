@@ -1,7 +1,8 @@
 // Step 4 §6-4 커스텀 레시피 — localStorage "filmlab.recipes.v1" (JSON 배열, 최대 200개). 순수 함수 + 주입 가능한 스토리지.
 import { CURVE_PRESETS, type CurvePoint } from "../render/curve";
-import { RECIPES } from "../render/recipes";
-import { normalizeValue, type CurveChoice, type EditCurve, type EditState, type ParamKey } from "./state";
+import { FILM_PRESETS } from "../render/film-presets";
+import type { DRange } from "../render/isp";
+import { normalizeDRange, normalizeValue, type CurveChoice, type EditCurve, type EditState, type ParamKey } from "./state";
 
 export const RECIPES_KEY = "filmlab.recipes.v1";
 export const RECIPES_CORRUPT_KEY = "filmlab.recipes.v1.corrupt";
@@ -15,12 +16,13 @@ type RecipeParamKey = (typeof RECIPE_PARAM_KEYS)[number];
 
 export interface Recipe {
   v: 1; id: string; name: string; createdAt: string; simId: string | null; filmStrength: number;
-  params: Record<RecipeParamKey, number>;
+  /** FSE-v2: dRange 100/200/400 (v1 레시피에 없으면 100) */
+  params: Record<RecipeParamKey, number> & { dRange: DRange };
   toneCurve: { preset: CurveChoice; points: CurvePoint[]; zones: [number, number, number, number, number] };
   toggles: { hdf: boolean };
 }
 
-const SIM_IDS: ReadonlySet<string> = new Set(Object.keys(RECIPES).filter((k) => k !== "none"));
+const SIM_IDS: ReadonlySet<string> = new Set(Object.keys(FILM_PRESETS));
 const PRESET_IDS: ReadonlySet<string> = new Set<string>([...Object.keys(CURVE_PRESETS), "custom"]);
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -76,7 +78,7 @@ export function validateRecipe(raw: unknown): Recipe | null {
   else if (typeof raw.simId === "string" && SIM_IDS.has(raw.simId)) simId = raw.simId;
   else return null;
   const p = isObj(raw.params) ? raw.params : {};
-  const params = {} as Record<RecipeParamKey, number>;
+  const params = { dRange: normalizeDRange(p.dRange) } as Recipe["params"];
   for (const k of RECIPE_PARAM_KEYS) params[k] = normalizeValue(k, p[k]);
   const tc = isObj(raw.toneCurve) ? raw.toneCurve : {};
   const points = sanitizePoints(tc.points);
@@ -93,7 +95,7 @@ export function validateRecipe(raw: unknown): Recipe | null {
 }
 
 export function recipeFromState(st: EditState, name: string, now: Date = new Date()): Recipe {
-  const params = {} as Record<RecipeParamKey, number>;
+  const params = { dRange: st.dRange } as Recipe["params"];
   for (const k of RECIPE_PARAM_KEYS) params[k] = (st as unknown as Record<string, number>)[k]!;
   return {
     v: 1, id: newRecipeId(), name: name.trim(), createdAt: now.toISOString(), simId: st.simId, filmStrength: st.filmStrength, params,
@@ -102,7 +104,7 @@ export function recipeFromState(st: EditState, name: string, now: Date = new Dat
   };
 }
 
-/** 적용: simId·filmStrength·params·toneCurve·toggles.hdf 로 EditState 를 통째로 바꾼다 (selectSim 연동 덮어쓰기 없음) */
+/** 적용: simId·filmStrength·params(dRange 포함)·toneCurve·toggles.hdf 로 EditState 를 통째로 바꾼다 (selectFilm 을 거치지 않음) */
 export function applyRecipe(base: EditState, r: Recipe): EditState {
   const st: EditState = { ...base, simId: r.simId, filmStrength: r.filmStrength, hdf: r.toggles.hdf, ...r.params };
   st.curve = { preset: r.toneCurve.preset, points: r.toneCurve.points.map((q) => [q[0], q[1]] as CurvePoint), zones: [...r.toneCurve.zones] as EditCurve["zones"] };

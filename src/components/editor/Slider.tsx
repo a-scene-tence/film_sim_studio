@@ -67,6 +67,8 @@ export interface TrackSliderProps {
   onDragStart?(): void;
   /** 조작 확정(손가락 뗌) 시 드래그 1회당 한 번 */
   onCommit?(): void;
+  /** FSE-v2 §6-4: 필름 프리셋 값 위치에 2×10px 눈금 (없으면 표시 안 함) */
+  tick?: number;
 }
 
 /**
@@ -99,6 +101,7 @@ export function TrackSlider(p: TrackSliderProps) {
   const zeroFrac = p.min < 0 ? (0 - p.min) / span : 0;
   const lo = Math.min(frac, zeroFrac), hi = Math.max(frac, zeroFrac);
   const changed = Math.abs(p.value - p.defaultValue) > 1e-9;
+  const tickFrac = p.tick !== undefined && span > 0 ? (Math.min(p.max, Math.max(p.min, p.tick)) - p.min) / span : null;
 
   const onDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType !== "touch") e.preventDefault(); // 마우스: 텍스트 선택 방지 (터치는 스크롤을 막지 않는다)
@@ -132,6 +135,7 @@ export function TrackSlider(p: TrackSliderProps) {
       >
         <div className="absolute left-0 right-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-[var(--line)]" style={p.trackBackground ? { background: p.trackBackground } : undefined} />
         {p.trackBackground ? null : <div className="absolute top-1/2 h-1 -translate-y-1/2 rounded-full bg-[var(--accent)]" style={{ left: `${lo * 100}%`, width: `${(hi - lo) * 100}%` }} />}
+        {tickFrac !== null ? <div aria-hidden="true" data-preset-tick="" className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2" style={{ left: `${tickFrac * 100}%`, width: 2, height: 10, background: "var(--text-2)" }} /> : null}
         <div className="absolute top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#f2f2f2] shadow" style={{ left: `${frac * 100}%` }} />
       </div>
     </div>
